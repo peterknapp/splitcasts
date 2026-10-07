@@ -1,0 +1,16 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+dist/
+build/
+data/raw/
+data/processed/
+data/state.json
+data/feed.xml
+*.mp3
+*.wav
+!assets/.gitkeep
+.DS_Store
+.pytest_cache/
