@@ -1,0 +1,12 @@
+[Unit]
+Description=Check ApoFiKa feed for new episodes between 04:00 and 07:00
+
+[Timer]
+# Every 30 minutes from 04:00 through 06:30, plus a final check at 07:00
+OnCalendar=*-*-* 04..06:00/30:00
+OnCalendar=*-*-* 07:00:00
+Persistent=true
+Unit=apofika-process.service
+
+[Install]
+WantedBy=timers.target

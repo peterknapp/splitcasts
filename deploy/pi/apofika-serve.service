@@ -1,0 +1,16 @@
+[Unit]
+Description=ApoFiKa local podcast RSS server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+EnvironmentFile=/etc/apofika.env
+User=pi
+Group=pi
+ExecStart=/bin/bash -lc 'cd "$APOFIKA_HOME" && exec .venv/bin/apofika serve --host "$APOFIKA_HOST" --port "$APOFIKA_PORT"'
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

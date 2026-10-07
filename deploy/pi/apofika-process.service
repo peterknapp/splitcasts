@@ -1,0 +1,15 @@
+[Unit]
+Description=ApoFiKa check/process latest episode
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+EnvironmentFile=/etc/apofika.env
+User=pi
+Group=pi
+# Nice/ionice: keep the Pi usable while detection runs (can take a long time on 3B)
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7
+ExecStart=/bin/bash -lc 'cd "$APOFIKA_HOME" && exec .venv/bin/apofika process --public-base "$APOFIKA_PUBLIC_BASE"'

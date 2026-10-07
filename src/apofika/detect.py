@@ -8,11 +8,16 @@ from pathlib import Path
 import librosa
 import numpy as np
 import soundfile as sf
-from scipy.signal import fftconvolve
+from mutagen.mp3 import MP3
+from scipy.signal import fftconvolve, find_peaks
 
 from apofika.paths import JINGLE_REF_PATH
 
 SAMPLE_RATE = 16_000
+# ~5 minutes per chunk — keeps peak RAM low on Raspberry Pi 3B
+CHUNK_SEC = 300.0
+# Floor while scanning so soft-fallback still has candidates without storing every sample
+SCAN_FLOOR = 0.35
 
 
 @dataclass
@@ -59,55 +64,123 @@ def extract_jingle(
     return dest
 
 
-def _load_mono(path: Path) -> np.ndarray:
-    y, _ = librosa.load(str(path), sr=SAMPLE_RATE, mono=True)
-    if y.size == 0:
-        raise ValueError(f"Empty audio: {path}")
-    # zero-mean, unit-ish peak normalize for stabler correlation
+def _normalize_audio(y: np.ndarray) -> np.ndarray:
+    y = y.astype(np.float32, copy=False)
     y = y - float(np.mean(y))
     peak = float(np.max(np.abs(y))) or 1.0
     return (y / peak).astype(np.float32)
 
 
+def _load_mono(path: Path) -> np.ndarray:
+    y, _ = librosa.load(str(path), sr=SAMPLE_RATE, mono=True)
+    if y.size == 0:
+        raise ValueError(f"Empty audio: {path}")
+    return _normalize_audio(y)
+
+
+def _prepare_template(template: np.ndarray) -> np.ndarray:
+    tmpl = template.astype(np.float32, copy=False)
+    tmpl = tmpl - float(np.mean(tmpl))
+    tmpl_norm = float(np.sqrt(np.sum(tmpl * tmpl))) or 1.0
+    return (tmpl / tmpl_norm).astype(np.float32)
+
+
 def _normalized_cross_correlation(signal: np.ndarray, template: np.ndarray) -> np.ndarray:
     """Return NCC scores along the signal (same length as signal - template + 1)."""
-    tmpl = template.astype(np.float64) - float(np.mean(template))
-    tmpl_norm = float(np.sqrt(np.sum(tmpl * tmpl))) or 1.0
-    tmpl = tmpl / tmpl_norm
-
-    sig = signal.astype(np.float64)
-    # correlation via FFT convolution with time-reversed template
-    corr = fftconvolve(sig, tmpl[::-1], mode="valid")
-
-    window = np.ones(len(tmpl), dtype=np.float64)
-    local_energy = np.convolve(sig * sig, window, mode="valid")
+    tmpl = _prepare_template(template)
+    sig = signal.astype(np.float32, copy=False)
+    corr = fftconvolve(sig, tmpl[::-1], mode="valid").astype(np.float32, copy=False)
+    window = np.ones(len(tmpl), dtype=np.float32)
+    local_energy = np.convolve(sig * sig, window, mode="valid").astype(np.float32, copy=False)
     local_norm = np.sqrt(np.maximum(local_energy, 1e-12))
-    return (corr / local_norm).astype(np.float64)
+    return (corr / local_norm).astype(np.float32)
 
 
-def _pick_peaks(
-    scores: np.ndarray,
-    sr: int,
+def _audio_duration_sec(path: Path) -> float:
+    try:
+        return float(MP3(path).info.length)
+    except Exception:
+        return float(librosa.get_duration(path=str(path)))
+
+
+def _scan_chunk_candidates(
+    episode_path: Path,
+    template: np.ndarray,
+    threshold: float,
+) -> list[JingleHit]:
+    """
+    Stream the episode in overlapping chunks and collect threshold candidates.
+    Avoids holding the full episode + full score array in RAM (Pi 3B friendly).
+    """
+    tmpl_len = len(template)
+    overlap_sec = tmpl_len / SAMPLE_RATE
+    hop_sec = max(60.0, CHUNK_SEC - overlap_sec)
+    duration = _audio_duration_sec(episode_path)
+    floor = min(threshold, SCAN_FLOOR)
+    # local peak spacing inside a chunk (~5s) — final min_distance applied later
+    local_distance = max(1, int(5.0 * SAMPLE_RATE))
+    candidates: list[JingleHit] = []
+
+    offset = 0.0
+    while offset < duration:
+        load_dur = min(CHUNK_SEC, max(0.0, duration - offset) + overlap_sec)
+        if load_dur <= 0:
+            break
+        y, _ = librosa.load(
+            str(episode_path),
+            sr=SAMPLE_RATE,
+            mono=True,
+            offset=offset,
+            duration=load_dur,
+        )
+        if y.size < tmpl_len:
+            break
+        y = _normalize_audio(y)
+        scores = _normalized_cross_correlation(y, template)
+
+        next_offset = offset + hop_sec
+        if next_offset < duration:
+            keep_samples = int(hop_sec * SAMPLE_RATE)
+            scores = scores[: max(1, keep_samples)]
+
+        peak_idxs, _ = find_peaks(scores, height=floor, distance=local_distance)
+        if peak_idxs.size == 0 and scores.size:
+            peak_idxs = np.array([int(np.argmax(scores))], dtype=int)
+
+        for idx in peak_idxs.tolist():
+            candidates.append(
+                JingleHit(
+                    time_sec=round(offset + idx / SAMPLE_RATE, 3),
+                    score=round(float(scores[idx]), 4),
+                )
+            )
+
+        del y, scores
+        offset = next_offset
+
+    return candidates
+
+
+def _pick_peaks_from_candidates(
+    candidates: list[JingleHit],
     threshold: float,
     min_distance_sec: float,
 ) -> list[JingleHit]:
-    min_distance = max(1, int(min_distance_sec * sr))
-    candidates = np.where(scores >= threshold)[0]
-    if candidates.size == 0:
-        # fall back to top absolute peaks above a softer relative threshold
-        soft = max(threshold * 0.85, float(np.max(scores)) * 0.55)
-        candidates = np.where(scores >= soft)[0]
+    if not candidates:
+        return []
 
+    above = [c for c in candidates if c.score >= threshold]
+    if not above:
+        max_score = max(c.score for c in candidates)
+        soft = max(threshold * 0.85, max_score * 0.55)
+        above = [c for c in candidates if c.score >= soft]
+
+    ranked = sorted(above, key=lambda c: c.score, reverse=True)
     hits: list[JingleHit] = []
-    # greedily take highest remaining peaks with distance constraint
-    ranked = sorted(candidates.tolist(), key=lambda i: float(scores[i]), reverse=True)
-    taken: list[int] = []
-    for idx in ranked:
-        if any(abs(idx - t) < min_distance for t in taken):
+    for cand in ranked:
+        if any(abs(cand.time_sec - h.time_sec) < min_distance_sec for h in hits):
             continue
-        taken.append(idx)
-        hits.append(JingleHit(time_sec=round(idx / sr, 3), score=round(float(scores[idx]), 4)))
-
+        hits.append(cand)
     hits.sort(key=lambda h: h.time_sec)
     return hits
 
@@ -124,13 +197,13 @@ def detect_jingles(
             "Run `apofika extract-jingle` first."
         )
 
-    signal = _load_mono(episode_path)
     template = _load_mono(jingle_path)
-    if len(template) >= len(signal):
-        raise ValueError("Jingle reference is longer than the episode")
-
-    scores = _normalized_cross_correlation(signal, template)
-    hits = _pick_peaks(scores, SAMPLE_RATE, threshold=threshold, min_distance_sec=min_distance_sec)
+    candidates = _scan_chunk_candidates(episode_path, template, threshold=threshold)
+    hits = _pick_peaks_from_candidates(
+        candidates,
+        threshold=threshold,
+        min_distance_sec=min_distance_sec,
+    )
     return DetectionResult(hits=hits, threshold=threshold, min_distance_sec=min_distance_sec)
 
 
