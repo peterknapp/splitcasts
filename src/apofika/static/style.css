@@ -129,54 +129,49 @@ input[type="file"] {
   justify-content: space-between;
   gap: 1rem;
 }
-.snippet-list { margin-top: 1rem; }
-.snippet-row {
-  display: flex !important;
-  flex-direction: row !important;
-  flex-wrap: nowrap !important;
-  align-items: center;
-  gap: 0.6rem;
-  border-bottom: 1px solid var(--line);
-  padding: 0.65rem 0;
-  overflow-x: auto;
+.snippet-table {
+  width: 100%;
+  margin-top: 1rem;
+  border-collapse: collapse;
+  border: 0;
 }
-.snippet-row:last-child { border-bottom: 0; }
-.snippet-slot {
-  flex: 0 0 auto;
+.snippet-table th,
+.snippet-table td {
+  border: 0 !important;
+  border-bottom: 0 !important;
+  vertical-align: middle;
+  padding: 0.55rem 0.6rem 0.55rem 0;
+  text-align: left;
+}
+.snippet-table th {
+  color: var(--muted);
+  font-size: 0.8rem;
+  font-weight: 600;
+  padding-bottom: 0.35rem;
+}
+.snippet-table .snippet-slot {
   white-space: nowrap;
-  max-width: 12rem;
+  width: 12rem;
+}
+.snippet-table .snippet-slot .mono {
+  display: inline-block;
+  max-width: 9rem;
   overflow: hidden;
   text-overflow: ellipsis;
+  vertical-align: bottom;
+  margin-left: 0.35rem;
 }
-.snippet-controls {
-  display: flex !important;
-  flex-direction: row !important;
-  flex-wrap: nowrap !important;
-  align-items: center;
-  gap: 0.5rem;
-  flex: 1 1 auto;
-}
-.snippet-controls form,
-.snippet-upload {
-  display: flex !important;
-  flex-direction: row !important;
-  flex-wrap: nowrap !important;
-  align-items: center;
-  gap: 0.5rem;
-  margin: 0;
-  width: auto !important;
-  max-width: none !important;
-}
-.snippet-controls input[type="file"] {
-  width: 14rem !important;
-  max-width: 14rem !important;
-  flex: 0 0 auto !important;
+.snippet-table input[type="file"] {
+  width: 16rem !important;
+  max-width: 100%;
   font-size: 0.85rem;
 }
-.snippet-controls button {
-  flex: 0 0 auto !important;
+.snippet-table form {
+  margin: 0;
+  display: inline;
+}
+.snippet-table button {
   white-space: nowrap;
-  width: auto !important;
 }
 button, .btn {
   appearance: none;

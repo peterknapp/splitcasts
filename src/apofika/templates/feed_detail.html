@@ -57,20 +57,41 @@
 <section class="card">
   <h2>Jingle-Snippets (max. 3)</h2>
   <p class="muted">Kurze Musikeinspieler als Erkennungs-Referenz. Mindestens eines nötig fürs Splitting.</p>
-  <div class="snippet-list">
-    {% for pos in [1, 2, 3] %}
-    {% set snip = snippets.get(pos) %}
-    <div class="snippet-row">
-      <span class="snippet-slot">Slot {{ pos }}{% if snip %}: <span class="mono">{{ snip.filename }}</span>{% else %}: leer{% endif %}</span>
-      <form method="post" action="/feeds/{{ podcast.slug }}/snippets/{{ pos }}" enctype="multipart/form-data" class="snippet-controls">
-        <input type="file" name="file" accept="audio/*,.wav,.mp3,.m4a" required>
-        <button type="submit">{% if snip %}Ersetzen{% else %}Hochladen{% endif %}</button>
-        {% if snip %}
-        <button class="danger" type="submit" formaction="/feeds/{{ podcast.slug }}/snippets/{{ pos }}/delete" formnovalidate>Löschen</button>
-        {% endif %}
-      </form>
-    </div>
-    {% endfor %}
-  </div>
+  <table class="snippet-table">
+    <thead>
+      <tr>
+        <th>Slot</th>
+        <th>Datei</th>
+        <th>Aktion</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for pos in [1, 2, 3] %}
+      {% set snip = snippets.get(pos) %}
+      <tr>
+        <td class="snippet-slot">
+          <strong>{{ pos }}</strong>
+          <span class="muted mono">{% if snip %}{{ snip.filename }}{% else %}leer{% endif %}</span>
+        </td>
+        <td>
+          <form id="snippet-form-{{ pos }}" method="post" action="/feeds/{{ podcast.slug }}/snippets/{{ pos }}" enctype="multipart/form-data">
+            <input type="file" name="file" accept="audio/*,.wav,.mp3,.m4a" required>
+          </form>
+        </td>
+        <td>
+          <button type="submit" form="snippet-form-{{ pos }}">{% if snip %}Ersetzen{% else %}Hochladen{% endif %}</button>
+        </td>
+        <td>
+          {% if snip %}
+          <form method="post" action="/feeds/{{ podcast.slug }}/snippets/{{ pos }}/delete">
+            <button class="danger" type="submit">Löschen</button>
+          </form>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
 </section>
 {% endblock %}
