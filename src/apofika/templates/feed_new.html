@@ -3,20 +3,42 @@
 {% block content %}
 <section class="card">
   <h1>Neuen Feed anlegen</h1>
-  <form method="post" action="/feeds/new" class="stack">
-    <label>Titel
-      <input type="text" name="title" required placeholder="Apokalypse & Filterkaffee">
-    </label>
-    <label>Slug (URL)
-      <input type="text" name="slug" required pattern="[a-z0-9]+(?:-[a-z0-9]+)*" placeholder="apofika">
-    </label>
+
+  {% if step != 2 %}
+  <p class="muted">Schritt 1: Quell-RSS-URL eingeben. Titel und Slug werden daraus vorgeschlagen.</p>
+  <form method="post" action="/feeds/new/preview" class="stack" style="margin-top:1rem">
     <label>Quell-RSS-URL
-      <input type="url" name="source_rss_url" required placeholder="https://…/feed/mp3">
+      <input type="url" name="source_rss_url" required placeholder="https://…/feed/mp3" value="{{ source_rss_url or '' }}">
     </label>
     <div class="row">
-      <button type="submit">Anlegen</button>
+      <button type="submit">Aus Feed laden</button>
       <a class="btn secondary" href="/">Abbrechen</a>
     </div>
   </form>
+  {% else %}
+  <p class="muted">Schritt 2: Vorschläge prüfen und Feed hinzufügen.</p>
+  <div class="podcast-identity" style="margin:1rem 0">
+    {% if image_url %}
+    <img class="podcast-cover lg" src="{{ image_url }}" alt="" width="56" height="56">
+    {% else %}
+    <span class="podcast-cover lg placeholder" aria-hidden="true"></span>
+    {% endif %}
+    <span class="muted mono">{{ source_rss_url }}</span>
+  </div>
+  <form method="post" action="/feeds/new" class="stack">
+    <input type="hidden" name="source_rss_url" value="{{ source_rss_url }}">
+    <input type="hidden" name="image_url" value="{{ image_url or '' }}">
+    <label>Titel
+      <input type="text" name="title" required value="{{ title }}">
+    </label>
+    <label>Slug (URL)
+      <input type="text" name="slug" required pattern="[a-z0-9]+(?:-[a-z0-9]+)*" value="{{ slug }}">
+    </label>
+    <div class="row">
+      <button type="submit">Hinzufügen</button>
+      <a class="btn secondary" href="/feeds/new">Zurück</a>
+    </div>
+  </form>
+  {% endif %}
 </section>
 {% endblock %}

@@ -132,6 +132,28 @@ def validate_slug(slug: str) -> str:
     return slug
 
 
+def suggest_slug(title: str, source_rss_url: str = "") -> str:
+    """Build a URL slug from a podcast title (fallback: host from URL)."""
+    import unicodedata
+    from urllib.parse import urlparse
+
+    text = (title or "").strip().lower()
+    text = unicodedata.normalize("NFKD", text)
+    text = "".join(ch for ch in text if not unicodedata.combining(ch))
+    text = re.sub(r"[^a-z0-9]+", "-", text).strip("-")
+    text = re.sub(r"-{2,}", "-", text)
+    if text and SLUG_RE.match(text):
+        return text[:60].strip("-")
+
+    host = urlparse(source_rss_url).netloc.lower()
+    host = host.removeprefix("www.")
+    host = re.sub(r"[^a-z0-9]+", "-", host).strip("-")
+    if host and SLUG_RE.match(host):
+        return host[:60].strip("-")
+    return "podcast"
+
+
+
 def list_podcasts(active_only: bool = False) -> list[Podcast]:
     with get_conn() as conn:
         if active_only:

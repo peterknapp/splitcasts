@@ -22,6 +22,7 @@ from apofika.db import (
     init_db,
     list_podcasts,
     list_snippets,
+    suggest_slug,
     update_podcast_image,
     upsert_snippet,
     validate_slug,
@@ -147,7 +148,41 @@ def create_app() -> FastAPI:
     def feed_new_form(request: Request):
         if (redir := require_auth(request)):
             return redir
-        return render(request, "feed_new.html")
+        return render(request, "feed_new.html", step=1)
+
+    @app.post("/feeds/new/preview", response_class=HTMLResponse)
+    async def feed_new_preview(request: Request, source_rss_url: str = Form(...)):
+        if (redir := require_auth(request)):
+            return redir
+        url = source_rss_url.strip()
+        try:
+            parsed = fetch_parsed(url)
+            meta = channel_meta(parsed)
+            title = (meta.get("title") or "").strip() or "Podcast"
+            slug = suggest_slug(title, url)
+            # Avoid colliding with existing slug by appending -2, -3, ...
+            base_slug = slug
+            n = 2
+            while get_podcast_by_slug(slug) is not None:
+                slug = f"{base_slug}-{n}"
+                n += 1
+            return render(
+                request,
+                "feed_new.html",
+                step=2,
+                source_rss_url=url,
+                title=title,
+                slug=slug,
+                image_url=meta.get("image"),
+            )
+        except Exception as exc:
+            flash(request, f"Feed konnte nicht geladen werden: {exc}", error=True)
+            return render(
+                request,
+                "feed_new.html",
+                step=1,
+                source_rss_url=url,
+            )
 
     @app.post("/feeds/new")
     async def feed_new_submit(
@@ -155,19 +190,33 @@ def create_app() -> FastAPI:
         title: str = Form(...),
         slug: str = Form(...),
         source_rss_url: str = Form(...),
+        image_url: str = Form(""),
     ):
         if (redir := require_auth(request)):
             return redir
         try:
             slug_norm = validate_slug(slug)
-            image = _fetch_channel_image(source_rss_url)
-            podcast = create_podcast(slug_norm, title, source_rss_url, image_url=image)
+            image = image_url.strip() or _fetch_channel_image(source_rss_url)
+            podcast = create_podcast(
+                slug_norm,
+                title.strip(),
+                source_rss_url.strip(),
+                image_url=image or None,
+            )
             ensure_feed_dirs(podcast.slug)
             flash(request, f"Feed „{podcast.title}“ angelegt.")
             return RedirectResponse(f"/feeds/{podcast.slug}", status_code=303)
         except Exception as exc:
             flash(request, str(exc), error=True)
-            return RedirectResponse("/feeds/new", status_code=303)
+            return render(
+                request,
+                "feed_new.html",
+                step=2,
+                source_rss_url=source_rss_url,
+                title=title,
+                slug=slug,
+                image_url=image_url or None,
+            )
 
     # Public output feed — must be registered before /feeds/{slug}
     @app.get("/feeds/{slug}.xml")
