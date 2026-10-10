@@ -51,7 +51,7 @@ h1, h2, h3 { font-family: var(--font); letter-spacing: -0.02em; margin: 0 0 0.6r
 .row.nowrap, .nowrap { flex-wrap: nowrap; white-space: nowrap; }
 .stack { display: grid; gap: 0.75rem; }
 label { display: grid; gap: 0.3rem; font-size: 0.9rem; color: var(--muted); }
-input[type="text"], input[type="url"], input[type="password"] {
+input[type="text"], input[type="url"], input[type="password"], input[type="number"], select {
   width: 100%;
   border: 1px solid var(--line);
   border-radius: 10px;
@@ -59,6 +59,15 @@ input[type="text"], input[type="url"], input[type="password"] {
   font: inherit;
   background: #fff;
   color: var(--ink);
+}
+.editor-fields {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.75rem;
+  align-items: end;
+}
+@media (max-width: 720px) {
+  .editor-fields { grid-template-columns: 1fr; }
 }
 input[type="file"] {
   border: 1px solid var(--line);

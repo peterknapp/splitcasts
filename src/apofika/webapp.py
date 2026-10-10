@@ -264,6 +264,7 @@ def create_app() -> FastAPI:
                 status = ep.status if ep else "new"
                 recent.append(
                     {
+                        "guid": meta.guid,
                         "title": meta.title,
                         "published": meta.published,
                         "published_fmt": format_published(meta.published),
@@ -296,6 +297,52 @@ def create_app() -> FastAPI:
             return RedirectResponse("/", status_code=303)
         result = process_podcast(podcast, base_url=config.public_base())
         flash(request, result.message, error=bool(result.error and not result.skipped))
+        return RedirectResponse(f"/feeds/{slug}", status_code=303)
+
+    @app.post("/feeds/{slug}/jingle/preview")
+    async def jingle_preview(
+        request: Request,
+        slug: str,
+        guid: str = Form(...),
+        start: str = Form(...),
+        duration: float = Form(3.0),
+    ):
+        if (redir := require_auth(request)):
+            return redir
+        podcast = get_podcast_by_slug(slug)
+        if not podcast:
+            return Response("Not found", status_code=404)
+        try:
+            from apofika.jingle_edit import ensure_episode_audio, render_clip_wav_bytes
+
+            source = ensure_episode_audio(podcast, guid)
+            wav = render_clip_wav_bytes(source, start, duration)
+            return Response(wav, media_type="audio/wav")
+        except Exception as exc:
+            return Response(str(exc), status_code=400, media_type="text/plain")
+
+    @app.post("/feeds/{slug}/jingle/save")
+    async def jingle_save(
+        request: Request,
+        slug: str,
+        guid: str = Form(...),
+        start: str = Form(...),
+        duration: float = Form(3.0),
+        position: int = Form(...),
+    ):
+        if (redir := require_auth(request)):
+            return redir
+        podcast = get_podcast_by_slug(slug)
+        if not podcast:
+            flash(request, "Feed nicht gefunden.", error=True)
+            return RedirectResponse("/", status_code=303)
+        try:
+            from apofika.jingle_edit import save_clip_to_slot
+
+            save_clip_to_slot(podcast, guid, start, duration, position)
+            flash(request, f"Jingle in Slot {position} gespeichert.")
+        except Exception as exc:
+            flash(request, str(exc), error=True)
         return RedirectResponse(f"/feeds/{slug}", status_code=303)
 
     @app.post("/feeds/{slug}/snippets/{position}")

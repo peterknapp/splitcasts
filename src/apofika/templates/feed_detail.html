@@ -55,6 +55,45 @@
 </section>
 
 <section class="card">
+  <h2>Jingle aus Episode erstellen</h2>
+  <p class="muted">Ausschnitt wählen, anhören und in einen Snippet-Slot speichern. Beim ersten Mal wird die Episode ggf. heruntergeladen.</p>
+  {% if recent %}
+  <form id="jingle-editor" class="stack" style="margin-top:1rem" method="post" action="/feeds/{{ podcast.slug }}/jingle/save">
+    <label>Episode
+      <select name="guid" required>
+        {% for item in recent %}
+        <option value="{{ item.guid }}">{{ item.title }} ({{ item.published_fmt }})</option>
+        {% endfor %}
+      </select>
+    </label>
+    <div class="row editor-fields">
+      <label>Start (MM:SS)
+        <input type="text" name="start" required placeholder="12:45">
+      </label>
+      <label>Dauer (Sekunden)
+        <input type="number" name="duration" value="3" min="0.5" max="10" step="0.5" required>
+      </label>
+      <label>Ziel-Slot
+        <select name="position" required>
+          <option value="1">1</option>
+          <option value="2">2</option>
+          <option value="3">3</option>
+        </select>
+      </label>
+    </div>
+    <div class="row">
+      <button type="button" class="secondary" id="jingle-preview-btn">Vorschau anhören</button>
+      <button type="submit">In Slot speichern</button>
+    </div>
+    <p id="jingle-editor-status" class="muted" hidden></p>
+    <audio id="jingle-preview-audio" controls style="width:100%; margin-top:0.5rem" hidden></audio>
+  </form>
+  {% else %}
+  <p class="muted">Keine Episoden geladen — Vorschau erst nach erfolgreichem Feed-Abruf möglich.</p>
+  {% endif %}
+</section>
+
+<section class="card">
   <h2>Jingle-Snippets (max. 3)</h2>
   <p class="muted">Kurze Musikeinspieler als Erkennungs-Referenz. Mindestens eines nötig fürs Splitting.</p>
   <table class="snippet-table">
@@ -94,4 +133,43 @@
     </tbody>
   </table>
 </section>
+
+<script>
+(() => {
+  const form = document.getElementById("jingle-editor");
+  const btn = document.getElementById("jingle-preview-btn");
+  const audio = document.getElementById("jingle-preview-audio");
+  const status = document.getElementById("jingle-editor-status");
+  if (!form || !btn || !audio) return;
+
+  btn.addEventListener("click", async () => {
+    status.hidden = false;
+    status.textContent = "Vorschau wird erzeugt (Episode wird ggf. geladen)…";
+    btn.disabled = true;
+    try {
+      const res = await fetch("/feeds/{{ podcast.slug }}/jingle/preview", {
+        method: "POST",
+        body: new FormData(form),
+        credentials: "same-origin",
+      });
+      if (!res.ok) {
+        const msg = await res.text();
+        throw new Error(msg || ("HTTP " + res.status));
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      if (audio.dataset.objectUrl) URL.revokeObjectURL(audio.dataset.objectUrl);
+      audio.dataset.objectUrl = url;
+      audio.src = url;
+      audio.hidden = false;
+      await audio.play();
+      status.textContent = "Vorschau bereit.";
+    } catch (err) {
+      status.textContent = "Vorschau fehlgeschlagen: " + (err.message || err);
+    } finally {
+      btn.disabled = false;
+    }
+  });
+})();
+</script>
 {% endblock %}
