@@ -12,4 +12,4 @@ Group=pi
 Nice=10
 IOSchedulingClass=best-effort
 IOSchedulingPriority=7
-ExecStart=/bin/bash -lc 'cd "$APOFIKA_HOME" && exec .venv/bin/apofika process --public-base "$APOFIKA_PUBLIC_BASE"'
+ExecStart=/bin/bash -lc 'cd "$APOFIKA_HOME" && exec .venv/bin/apofika process-all --public-base "${SPLITCASTS_PUBLIC_BASE:-$APOFIKA_PUBLIC_BASE}"'

@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block title %}Login · Splitcasts{% endblock %}
+{% block content %}
+<section class="card login-card">
+  <h1>Splitcasts</h1>
+  <p class="muted">Admin-Login für Feed-Verwaltung und Snippet-Uploads.</p>
+  <form method="post" action="/login" class="stack" style="margin-top:1rem">
+    <label>Passwort
+      <input type="password" name="password" required autofocus>
+    </label>
+    <button type="submit">Anmelden</button>
+  </form>
+</section>
+{% endblock %}

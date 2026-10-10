@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% block title %}Feeds · Splitcasts{% endblock %}
+{% block content %}
+<section class="card">
+  <h1>Podcast-Feeds</h1>
+  <p class="muted">Quell-Feeds verwalten, snippen und als Kapitel-Feeds ausliefern.</p>
+  {% if podcasts %}
+  <ul class="list">
+    {% for p in podcasts %}
+    <li>
+      <div>
+        <a href="/feeds/{{ p.slug }}"><strong>{{ p.title }}</strong></a>
+        <div class="muted mono">{{ p.slug }}</div>
+      </div>
+      <div class="row">
+        <a class="btn secondary" href="/feeds/{{ p.slug }}.xml" target="_blank" rel="noopener">Output-Feed</a>
+        <a class="btn secondary" href="/feeds/{{ p.slug }}">Details</a>
+      </div>
+    </li>
+    {% endfor %}
+  </ul>
+  {% else %}
+  <p class="muted">Noch keine Feeds. Lege den ersten an.</p>
+  {% endif %}
+</section>
+{% endblock %}

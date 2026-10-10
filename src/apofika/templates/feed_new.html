@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block title %}Neuer Feed · Splitcasts{% endblock %}
+{% block content %}
+<section class="card">
+  <h1>Neuen Feed anlegen</h1>
+  <form method="post" action="/feeds/new" class="stack">
+    <label>Titel
+      <input type="text" name="title" required placeholder="Apokalypse & Filterkaffee">
+    </label>
+    <label>Slug (URL)
+      <input type="text" name="slug" required pattern="[a-z0-9]+(?:-[a-z0-9]+)*" placeholder="apofika">
+    </label>
+    <label>Quell-RSS-URL
+      <input type="url" name="source_rss_url" required placeholder="https://…/feed/mp3">
+    </label>
+    <div class="row">
+      <button type="submit">Anlegen</button>
+      <a class="btn secondary" href="/">Abbrechen</a>
+    </div>
+  </form>
+</section>
+{% endblock %}

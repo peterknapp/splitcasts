@@ -1,0 +1,78 @@
+{% extends "base.html" %}
+{% block title %}{{ podcast.title }} · Splitcasts{% endblock %}
+{% block content %}
+<section class="card">
+  <div class="row" style="justify-content:space-between">
+    <div>
+      <h1>{{ podcast.title }}</h1>
+      <div class="muted mono">{{ podcast.slug }}</div>
+    </div>
+    <a class="btn secondary" href="/feeds/{{ podcast.slug }}.xml" target="_blank" rel="noopener">Öffentlicher Feed</a>
+  </div>
+  <p class="muted" style="margin-top:0.8rem">Quelle: <a href="{{ podcast.source_rss_url }}" target="_blank" rel="noopener">{{ podcast.source_rss_url }}</a></p>
+  <form method="post" action="/feeds/{{ podcast.slug }}/process" class="row" style="margin-top:1rem">
+    <button type="submit">Jetzt prüfen / verarbeiten</button>
+    <span class="muted">Neueste Folge laden, snippen, Output-Feed aktualisieren (max. 3 Dateien).</span>
+  </form>
+</section>
+
+<section class="card">
+  <h2>Letzte 5 Folgen</h2>
+  {% if recent_error %}
+  <p class="flash error">{{ recent_error }}</p>
+  {% endif %}
+  <table>
+    <thead>
+      <tr>
+        <th>Titel</th>
+        <th class="hide-sm">Datum</th>
+        <th>Status</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for item in recent %}
+      <tr>
+        <td>{{ item.title }}</td>
+        <td class="hide-sm muted">{{ item.published or "—" }}</td>
+        <td><span class="badge {{ item.status }}">{{ item.status_label }}</span>
+          {% if item.error %}<div class="muted">{{ item.error }}</div>{% endif %}
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="3" class="muted">Keine Einträge geladen.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+
+<section class="card">
+  <h2>Jingle-Snippets (max. 3)</h2>
+  <p class="muted">Kurze Musikeinspieler als Erkennungs-Referenz. Mindestens eines nötig fürs Splitting.</p>
+  <div class="stack" style="margin-top:1rem">
+    {% for pos in [1, 2, 3] %}
+    {% set snip = snippets.get(pos) %}
+    <div class="row" style="justify-content:space-between; border-bottom:1px solid var(--line); padding:0.6rem 0">
+      <div>
+        <strong>Slot {{ pos }}</strong>
+        {% if snip %}
+        <div class="muted mono">{{ snip.filename }}</div>
+        {% else %}
+        <div class="muted">leer</div>
+        {% endif %}
+      </div>
+      <div class="row">
+        <form method="post" action="/feeds/{{ podcast.slug }}/snippets/{{ pos }}" enctype="multipart/form-data" class="row">
+          <input type="file" name="file" accept="audio/*,.wav,.mp3,.m4a" required>
+          <button type="submit">{% if snip %}Ersetzen{% else %}Hochladen{% endif %}</button>
+        </form>
+        {% if snip %}
+        <form method="post" action="/feeds/{{ podcast.slug }}/snippets/{{ pos }}/delete">
+          <button class="danger" type="submit">Löschen</button>
+        </form>
+        {% endif %}
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+</section>
+{% endblock %}

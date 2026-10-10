@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Splitcasts{% endblock %}</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <div class="wrap">
+    {% if request.session.get("auth") %}
+    <div class="top">
+      <a class="brand" href="/">Splitcasts</a>
+      <div class="row">
+        <a class="btn secondary" href="/feeds/new">Neuer Feed</a>
+        <form method="post" action="/logout"><button class="secondary" type="submit">Logout</button></form>
+      </div>
+    </div>
+    {% endif %}
+    {% if flash %}
+      <div class="flash {% if flash_error %}error{% endif %}">{{ flash }}</div>
+    {% endif %}
+    {% block content %}{% endblock %}
+  </div>
+</body>
+</html>

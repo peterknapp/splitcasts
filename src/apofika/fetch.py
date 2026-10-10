@@ -82,8 +82,7 @@ def _image_url(entry: feedparser.FeedParserDict, feed: feedparser.FeedParserDict
     return None
 
 
-def parse_latest(feed_url: str = SOURCE_FEED_URL) -> tuple[EpisodeMeta, feedparser.FeedParserDict]:
-    # Fetch via httpx (more reliable than urllib behind proxies), then parse.
+def fetch_parsed(feed_url: str) -> feedparser.FeedParserDict:
     with httpx.Client(follow_redirects=True, timeout=60.0) as client:
         response = client.get(feed_url)
         response.raise_for_status()
@@ -92,17 +91,20 @@ def parse_latest(feed_url: str = SOURCE_FEED_URL) -> tuple[EpisodeMeta, feedpars
         raise RuntimeError(f"Failed to parse feed: {parsed.bozo_exception}")
     if not parsed.entries:
         raise RuntimeError("Feed has no entries")
+    return parsed
 
-    entry = parsed.entries[0]
+
+def entry_to_meta(
+    entry: feedparser.FeedParserDict,
+    parsed: feedparser.FeedParserDict,
+) -> EpisodeMeta:
     url, enc_type, length = _enclosure(entry)
     description = entry.get("summary") or entry.get("description") or ""
     if entry.get("content"):
-        # prefer plain-ish text from content:encoded when present
         content0 = entry.content[0]
         if content0.get("value"):
             description = content0["value"]
-
-    meta = EpisodeMeta(
+    return EpisodeMeta(
         guid=_entry_guid(entry),
         title=str(entry.get("title") or "Untitled"),
         description=str(description),
@@ -117,7 +119,25 @@ def parse_latest(feed_url: str = SOURCE_FEED_URL) -> tuple[EpisodeMeta, feedpars
         author=str(entry.get("author") or entry.get("itunes_author") or "") or None,
         episode_number=_parse_episode_number(entry),
     )
-    return meta, parsed
+
+
+def parse_latest(feed_url: str = SOURCE_FEED_URL) -> tuple[EpisodeMeta, feedparser.FeedParserDict]:
+    parsed = fetch_parsed(feed_url)
+    return entry_to_meta(parsed.entries[0], parsed), parsed
+
+
+def parse_recent(
+    feed_url: str,
+    limit: int = 5,
+) -> tuple[list[EpisodeMeta], feedparser.FeedParserDict]:
+    parsed = fetch_parsed(feed_url)
+    items: list[EpisodeMeta] = []
+    for entry in parsed.entries[:limit]:
+        try:
+            items.append(entry_to_meta(entry, parsed))
+        except ValueError:
+            continue
+    return items, parsed
 
 
 def _parse_episode_number(entry: feedparser.FeedParserDict) -> int | None:

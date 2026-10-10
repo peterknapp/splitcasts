@@ -191,16 +191,35 @@ def detect_jingles(
     threshold: float = 0.55,
     min_distance_sec: float = 60.0,
 ) -> DetectionResult:
-    if not jingle_path.exists():
+    return detect_jingles_multi(
+        episode_path,
+        [jingle_path],
+        threshold=threshold,
+        min_distance_sec=min_distance_sec,
+    )
+
+
+def detect_jingles_multi(
+    episode_path: Path,
+    jingle_paths: list[Path],
+    threshold: float = 0.55,
+    min_distance_sec: float = 60.0,
+) -> DetectionResult:
+    paths = [p for p in jingle_paths if p.exists()]
+    if not paths:
         raise FileNotFoundError(
-            f"Jingle reference missing: {jingle_path}. "
-            "Run `apofika extract-jingle` first."
+            "No jingle snippets found. Upload up to 3 snippets in the feed detail UI."
         )
 
-    template = _load_mono(jingle_path)
-    candidates = _scan_chunk_candidates(episode_path, template, threshold=threshold)
+    all_candidates: list[JingleHit] = []
+    for path in paths:
+        template = _load_mono(path)
+        all_candidates.extend(
+            _scan_chunk_candidates(episode_path, template, threshold=threshold)
+        )
+
     hits = _pick_peaks_from_candidates(
-        candidates,
+        all_candidates,
         threshold=threshold,
         min_distance_sec=min_distance_sec,
     )

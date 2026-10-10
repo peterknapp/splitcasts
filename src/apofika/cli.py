@@ -1,4 +1,4 @@
-"""Typer CLI for ApoFiKa chapter pipeline."""
+"""Typer CLI for Splitcasts / ApoFiKa chapter pipeline."""
 
 from __future__ import annotations
 
@@ -8,6 +8,7 @@ from typing import Optional
 import typer
 import uvicorn
 
+from apofika.auth import hash_password
 from apofika.detect import extract_jingle, parse_timestamp
 from apofika.paths import (
     DEFAULT_HOST,
@@ -20,7 +21,7 @@ from apofika.pipeline import process_latest
 
 app = typer.Typer(
     name="apofika",
-    help="Add chapter markers to Apokalypse & Filterkaffee episodes.",
+    help="Splitcasts: chapter markers for podcast feeds.",
     add_completion=False,
 )
 
@@ -65,11 +66,11 @@ def process_cmd(
     public_base: Optional[str] = typer.Option(
         None,
         "--public-base",
-        help="Public base URL for enclosure links (default http://127.0.0.1:8787)",
+        help="Public base URL for enclosure links",
     ),
     jingle: Path = typer.Option(JINGLE_REF_PATH, "--jingle", help="Jingle reference WAV"),
 ) -> None:
-    """Fetch the latest episode, detect jingles, embed chapters, refresh local feed."""
+    """Legacy single-feed process (prefer process-all / web UI)."""
     result = process_latest(
         feed_url=feed_url,
         force=force,
@@ -84,10 +85,44 @@ def process_cmd(
     if result.warnings:
         for w in result.warnings:
             typer.echo(f"Warning: {w}")
-    if result.processed_path:
-        typer.echo(f"Processed MP3: {result.processed_path}")
-    if result.chapters_path:
-        typer.echo(f"Chapters JSON: {result.chapters_path}")
+
+
+@app.command("process-all")
+def process_all_cmd(
+    force: bool = typer.Option(False, "--force"),
+    public_base: Optional[str] = typer.Option(None, "--public-base"),
+) -> None:
+    """Process latest episode for every active podcast in the DB."""
+    from apofika.db import init_db
+    from apofika.worker import process_all
+
+    init_db()
+    results = process_all(force=force, base_url=public_base)
+    if not results:
+        typer.echo("No active podcasts. Run `apofika migrate` or create feeds in the UI.")
+        return
+    for result in results:
+        typer.echo(f"[{result.slug}] {result.message}")
+
+
+@app.command("migrate")
+def migrate_cmd() -> None:
+    """Create ApoFiKa podcast and import legacy data/ files."""
+    from apofika.worker import migrate_apofika_legacy
+
+    podcast = migrate_apofika_legacy()
+    if podcast:
+        typer.echo(f"Migrated/ready: {podcast.title} (/{podcast.slug})")
+    else:
+        typer.echo("Nothing to migrate.")
+
+
+@app.command("hash-password")
+def hash_password_cmd(
+    password: str = typer.Option(..., "--password", prompt=True, hide_input=True),
+) -> None:
+    """Print a PBKDF2 hash for SPLITCASTS_PASSWORD_HASH."""
+    typer.echo(hash_password(password))
 
 
 @app.command("serve")
@@ -95,10 +130,14 @@ def serve_cmd(
     host: str = typer.Option(DEFAULT_HOST, "--host"),
     port: int = typer.Option(DEFAULT_PORT, "--port"),
 ) -> None:
-    """Serve local RSS feed and processed media files."""
+    """Serve Splitcasts admin UI, output feeds and media."""
+    from apofika.db import init_db
+
     ensure_dirs()
-    typer.echo(f"Serving feed at http://{host}:{port}/feed.xml")
-    uvicorn.run("apofika.serve:app", host=host, port=port, reload=False)
+    init_db()
+    typer.echo(f"Splitcasts UI at http://{host}:{port}/")
+    typer.echo(f"Public feeds at http://{host}:{port}/feeds/{{slug}}.xml")
+    uvicorn.run("apofika.webapp:app", host=host, port=port, reload=False)
 
 
 if __name__ == "__main__":
