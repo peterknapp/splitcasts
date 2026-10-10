@@ -22,10 +22,12 @@ from apofika.db import (
     init_db,
     list_podcasts,
     list_snippets,
+    update_podcast_image,
     upsert_snippet,
     validate_slug,
 )
-from apofika.fetch import parse_recent
+from apofika.fetch import channel_meta, fetch_parsed, parse_recent
+from apofika.formatting import format_published
 from apofika.paths import (
     STATIC_DIR,
     TEMPLATES_DIR,
@@ -37,6 +39,14 @@ from apofika.paths import (
     feed_xml_path,
 )
 from apofika.worker import process_podcast
+
+
+def _fetch_channel_image(source_rss_url: str) -> str | None:
+    try:
+        parsed = fetch_parsed(source_rss_url)
+        return channel_meta(parsed).get("image")
+    except Exception:
+        return None
 
 STATUS_LABELS = {
     "split": "gesplittet",
@@ -117,7 +127,21 @@ def create_app() -> FastAPI:
     def index(request: Request):
         if (redir := require_auth(request)):
             return redir
-        return render(request, "index.html", podcasts=list_podcasts())
+        base = config.public_base()
+        podcasts = list_podcasts()
+        # Backfill missing cover art once when listing
+        for podcast in podcasts:
+            if not podcast.image_url:
+                image = _fetch_channel_image(podcast.source_rss_url)
+                if image:
+                    update_podcast_image(podcast.id, image)
+                    podcast.image_url = image
+        return render(
+            request,
+            "index.html",
+            podcasts=podcasts,
+            public_base=base,
+        )
 
     @app.get("/feeds/new", response_class=HTMLResponse)
     def feed_new_form(request: Request):
@@ -136,7 +160,8 @@ def create_app() -> FastAPI:
             return redir
         try:
             slug_norm = validate_slug(slug)
-            podcast = create_podcast(slug_norm, title, source_rss_url)
+            image = _fetch_channel_image(source_rss_url)
+            podcast = create_podcast(slug_norm, title, source_rss_url, image_url=image)
             ensure_feed_dirs(podcast.slug)
             flash(request, f"Feed „{podcast.title}“ angelegt.")
             return RedirectResponse(f"/feeds/{podcast.slug}", status_code=303)
@@ -175,6 +200,12 @@ def create_app() -> FastAPI:
             flash(request, "Feed nicht gefunden.", error=True)
             return RedirectResponse("/", status_code=303)
 
+        if not podcast.image_url:
+            image = _fetch_channel_image(podcast.source_rss_url)
+            if image:
+                update_podcast_image(podcast.id, image)
+                podcast.image_url = image
+
         recent = []
         recent_error = None
         try:
@@ -186,6 +217,7 @@ def create_app() -> FastAPI:
                     {
                         "title": meta.title,
                         "published": meta.published,
+                        "published_fmt": format_published(meta.published),
                         "status": status,
                         "status_label": STATUS_LABELS.get(status, status),
                         "error": ep.error_message if ep else None,
@@ -202,6 +234,7 @@ def create_app() -> FastAPI:
             recent=recent,
             recent_error=recent_error,
             snippets=snippets,
+            public_feed_url=f"{config.public_base()}/feeds/{podcast.slug}.xml",
         )
 
     @app.post("/feeds/{slug}/process")

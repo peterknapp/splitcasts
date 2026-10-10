@@ -7,13 +7,25 @@
   {% if podcasts %}
   <ul class="list">
     {% for p in podcasts %}
-    <li>
-      <div>
-        <a href="/feeds/{{ p.slug }}"><strong>{{ p.title }}</strong></a>
-        <div class="muted mono">{{ p.slug }}</div>
+    <li class="podcast-row">
+      <div class="podcast-main">
+        {% if p.image_url %}
+        <img class="podcast-cover" src="{{ p.image_url }}" alt="" width="56" height="56" loading="lazy">
+        {% else %}
+        <div class="podcast-cover placeholder" aria-hidden="true"></div>
+        {% endif %}
+        <div>
+          <a href="/feeds/{{ p.slug }}"><strong>{{ p.title }}</strong></a>
+          <div class="muted mono">{{ p.slug }}</div>
+        </div>
       </div>
-      <div class="row">
-        <a class="btn secondary" href="/feeds/{{ p.slug }}.xml" target="_blank" rel="noopener">Output-Feed</a>
+      <div class="row nowrap">
+        <button
+          type="button"
+          class="btn secondary copy-btn"
+          data-copy="{{ public_base }}/feeds/{{ p.slug }}.xml"
+          data-label="Feed-URL kopieren"
+        >Feed-URL kopieren</button>
         <a class="btn secondary" href="/feeds/{{ p.slug }}">Details</a>
       </div>
     </li>

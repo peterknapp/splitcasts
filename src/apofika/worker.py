@@ -292,7 +292,8 @@ def process_all(*, force: bool = False, base_url: str | None = None) -> list[Pro
 
 def migrate_apofika_legacy() -> Podcast | None:
     """Create ApoFiKa podcast and move legacy files if present."""
-    from apofika.db import create_podcast, get_podcast_by_slug, init_db
+    from apofika.db import create_podcast, get_podcast_by_slug, init_db, update_podcast_image
+    from apofika.fetch import channel_meta, fetch_parsed
     from apofika.paths import (
         JINGLE_REF_PATH,
         PROCESSED_DIR,
@@ -301,15 +302,25 @@ def migrate_apofika_legacy() -> Podcast | None:
     )
 
     init_db()
+    image_url = None
+    try:
+        image_url = channel_meta(fetch_parsed(SOURCE_FEED_URL)).get("image")
+    except Exception:
+        image_url = None
+
     existing = get_podcast_by_slug("apofika")
     if existing is None:
         podcast = create_podcast(
             slug="apofika",
             title="Apokalypse & Filterkaffee",
             source_rss_url=SOURCE_FEED_URL,
+            image_url=image_url,
         )
     else:
         podcast = existing
+        if image_url and not podcast.image_url:
+            update_podcast_image(podcast.id, image_url)
+            podcast.image_url = image_url
 
     ensure_feed_dirs(podcast.slug)
     snippets_dir = feed_snippets_dir(podcast.slug)

@@ -22,5 +22,20 @@
     {% endif %}
     {% block content %}{% endblock %}
   </div>
+  <script>
+    document.addEventListener("click", async (event) => {
+      const btn = event.target.closest(".copy-btn");
+      if (!btn) return;
+      const value = btn.getAttribute("data-copy") || "";
+      const label = btn.getAttribute("data-label") || "Kopieren";
+      try {
+        await navigator.clipboard.writeText(value);
+        btn.textContent = "Kopiert";
+        setTimeout(() => { btn.textContent = label; }, 1500);
+      } catch (err) {
+        window.prompt("URL kopieren:", value);
+      }
+    });
+  </script>
 </body>
 </html>

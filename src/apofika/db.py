@@ -24,6 +24,7 @@ class Podcast:
     source_rss_url: str
     active: bool
     created_at: str
+    image_url: str | None = None
 
 
 @dataclass
@@ -83,7 +84,8 @@ def init_db(path: Path | None = None) -> None:
               title TEXT NOT NULL,
               source_rss_url TEXT NOT NULL,
               active INTEGER NOT NULL DEFAULT 1,
-              created_at TEXT NOT NULL
+              created_at TEXT NOT NULL,
+              image_url TEXT
             );
             CREATE TABLE IF NOT EXISTS snippets (
               id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -111,6 +113,12 @@ def init_db(path: Path | None = None) -> None:
               ON episodes(podcast_id, status);
             """
         )
+        cols = {
+            row["name"]
+            for row in conn.execute("PRAGMA table_info(podcasts)").fetchall()
+        }
+        if "image_url" not in cols:
+            conn.execute("ALTER TABLE podcasts ADD COLUMN image_url TEXT")
 
 
 def _now() -> str:
@@ -153,7 +161,12 @@ def get_podcast(podcast_id: int) -> Podcast | None:
     return _podcast(row) if row else None
 
 
-def create_podcast(slug: str, title: str, source_rss_url: str) -> Podcast:
+def create_podcast(
+    slug: str,
+    title: str,
+    source_rss_url: str,
+    image_url: str | None = None,
+) -> Podcast:
     slug = validate_slug(slug)
     title = title.strip()
     source_rss_url = source_rss_url.strip()
@@ -162,10 +175,10 @@ def create_podcast(slug: str, title: str, source_rss_url: str) -> Podcast:
     with get_conn() as conn:
         cur = conn.execute(
             """
-            INSERT INTO podcasts (slug, title, source_rss_url, active, created_at)
-            VALUES (?, ?, ?, 1, ?)
+            INSERT INTO podcasts (slug, title, source_rss_url, active, created_at, image_url)
+            VALUES (?, ?, ?, 1, ?, ?)
             """,
-            (slug, title, source_rss_url, _now()),
+            (slug, title, source_rss_url, _now(), image_url),
         )
         pid = int(cur.lastrowid)
     podcast = get_podcast(pid)
@@ -173,7 +186,16 @@ def create_podcast(slug: str, title: str, source_rss_url: str) -> Podcast:
     return podcast
 
 
+def update_podcast_image(podcast_id: int, image_url: str | None) -> None:
+    with get_conn() as conn:
+        conn.execute(
+            "UPDATE podcasts SET image_url = ? WHERE id = ?",
+            (image_url, podcast_id),
+        )
+
+
 def _podcast(row: sqlite3.Row) -> Podcast:
+    keys = row.keys()
     return Podcast(
         id=row["id"],
         slug=row["slug"],
@@ -181,6 +203,7 @@ def _podcast(row: sqlite3.Row) -> Podcast:
         source_rss_url=row["source_rss_url"],
         active=bool(row["active"]),
         created_at=row["created_at"],
+        image_url=row["image_url"] if "image_url" in keys else None,
     )
 
 
