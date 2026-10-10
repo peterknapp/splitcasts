@@ -8,18 +8,15 @@
   <ul class="list">
     {% for p in podcasts %}
     <li class="podcast-row">
-      <div class="podcast-main">
+      <a class="podcast-identity" href="/feeds/{{ p.slug }}">
         {% if p.image_url %}
-        <img class="podcast-cover" src="{{ p.image_url }}" alt="" width="56" height="56" loading="lazy">
+        <img class="podcast-cover" src="{{ p.image_url }}" alt="" width="48" height="48" loading="lazy">
         {% else %}
-        <div class="podcast-cover placeholder" aria-hidden="true"></div>
+        <span class="podcast-cover placeholder" aria-hidden="true"></span>
         {% endif %}
-        <div>
-          <a href="/feeds/{{ p.slug }}"><strong>{{ p.title }}</strong></a>
-          <div class="muted mono">{{ p.slug }}</div>
-        </div>
-      </div>
-      <div class="row nowrap">
+        <span class="podcast-title">{{ p.title }}</span>
+      </a>
+      <div class="podcast-actions">
         <button
           type="button"
           class="btn secondary copy-btn"

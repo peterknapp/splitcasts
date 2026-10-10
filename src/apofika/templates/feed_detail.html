@@ -2,17 +2,14 @@
 {% block title %}{{ podcast.title }} · Splitcasts{% endblock %}
 {% block content %}
 <section class="card">
-  <div class="row" style="justify-content:space-between; align-items:flex-start">
-    <div class="podcast-main">
+  <div class="detail-head">
+    <div class="podcast-identity">
       {% if podcast.image_url %}
-      <img class="podcast-cover lg" src="{{ podcast.image_url }}" alt="" width="72" height="72" loading="lazy">
+      <img class="podcast-cover lg" src="{{ podcast.image_url }}" alt="" width="56" height="56" loading="lazy">
       {% else %}
-      <div class="podcast-cover lg placeholder" aria-hidden="true"></div>
+      <span class="podcast-cover lg placeholder" aria-hidden="true"></span>
       {% endif %}
-      <div>
-        <h1>{{ podcast.title }}</h1>
-        <div class="muted mono">{{ podcast.slug }}</div>
-      </div>
+      <h1 class="podcast-title">{{ podcast.title }}</h1>
     </div>
     <button
       type="button"
@@ -60,25 +57,22 @@
 <section class="card">
   <h2>Jingle-Snippets (max. 3)</h2>
   <p class="muted">Kurze Musikeinspieler als Erkennungs-Referenz. Mindestens eines nötig fürs Splitting.</p>
-  <div class="stack snippet-list" style="margin-top:1rem">
+  <div class="snippet-list">
     {% for pos in [1, 2, 3] %}
     {% set snip = snippets.get(pos) %}
     <div class="snippet-row">
-      <div class="snippet-meta">
-        <strong>Slot {{ pos }}</strong>
-        <span class="muted mono">{% if snip %}{{ snip.filename }}{% else %}leer{% endif %}</span>
+      <span class="snippet-slot">Slot {{ pos }}{% if snip %}: <span class="mono">{{ snip.filename }}</span>{% else %}: leer{% endif %}</span>
+      <div class="snippet-controls">
+        <form method="post" action="/feeds/{{ podcast.slug }}/snippets/{{ pos }}" enctype="multipart/form-data" class="snippet-upload">
+          <input type="file" name="file" accept="audio/*,.wav,.mp3,.m4a" required>
+          <button type="submit">{% if snip %}Ersetzen{% else %}Hochladen{% endif %}</button>
+        </form>
+        {% if snip %}
+        <form method="post" action="/feeds/{{ podcast.slug }}/snippets/{{ pos }}/delete">
+          <button class="danger" type="submit">Löschen</button>
+        </form>
+        {% endif %}
       </div>
-      <form method="post" action="/feeds/{{ podcast.slug }}/snippets/{{ pos }}" enctype="multipart/form-data" class="snippet-actions">
-        <input type="file" name="file" accept="audio/*,.wav,.mp3,.m4a" required>
-        <button type="submit">{% if snip %}Ersetzen{% else %}Hochladen{% endif %}</button>
-      </form>
-      {% if snip %}
-      <form method="post" action="/feeds/{{ podcast.slug }}/snippets/{{ pos }}/delete" class="snippet-delete">
-        <button class="danger" type="submit">Löschen</button>
-      </form>
-      {% else %}
-      <span class="snippet-delete-spacer" aria-hidden="true"></span>
-      {% endif %}
     </div>
     {% endfor %}
   </div>
