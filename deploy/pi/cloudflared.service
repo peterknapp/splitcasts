@@ -1,0 +1,16 @@
+[Unit]
+Description=Cloudflare Tunnel for splitcasts.peterknapp.de
+After=network-online.target apofika-serve.service
+Wants=network-online.target
+Requires=apofika-serve.service
+
+[Service]
+Type=simple
+User=pknapp
+Group=pknapp
+ExecStart=/home/pknapp/.local/bin/cloudflared tunnel --config /home/pknapp/.cloudflared/config.yml run
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

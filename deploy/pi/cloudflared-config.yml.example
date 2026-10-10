@@ -1,0 +1,10 @@
+# Install to ~/.cloudflared/config.yml after creating the tunnel.
+# Replace TUNNEL_UUID with the id from: cloudflared tunnel create splitcasts
+
+tunnel: TUNNEL_UUID
+credentials-file: /home/pknapp/.cloudflared/TUNNEL_UUID.json
+
+ingress:
+  - hostname: splitcasts.peterknapp.de
+    service: http://127.0.0.1:8787
+  - service: http_status:404
