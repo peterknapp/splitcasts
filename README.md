@@ -27,7 +27,7 @@ Typischer Einsatz: privat auf dem eigenen Rechner oder einem Raspberry Pi, optio
 ## Lokal starten (schnell)
 
 ```bash
-git clone https://origin.cursor.com/peter-knapp/splitcasts.git Splitcasts
+git clone https://github.com/peterknapp/splitcasts.git Splitcasts
 cd Splitcasts
 
 python3 -m venv .venv
