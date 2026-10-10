@@ -62,17 +62,13 @@
     {% set snip = snippets.get(pos) %}
     <div class="snippet-row">
       <span class="snippet-slot">Slot {{ pos }}{% if snip %}: <span class="mono">{{ snip.filename }}</span>{% else %}: leer{% endif %}</span>
-      <div class="snippet-controls">
-        <form method="post" action="/feeds/{{ podcast.slug }}/snippets/{{ pos }}" enctype="multipart/form-data" class="snippet-upload">
-          <input type="file" name="file" accept="audio/*,.wav,.mp3,.m4a" required>
-          <button type="submit">{% if snip %}Ersetzen{% else %}Hochladen{% endif %}</button>
-        </form>
+      <form method="post" action="/feeds/{{ podcast.slug }}/snippets/{{ pos }}" enctype="multipart/form-data" class="snippet-controls">
+        <input type="file" name="file" accept="audio/*,.wav,.mp3,.m4a" required>
+        <button type="submit">{% if snip %}Ersetzen{% else %}Hochladen{% endif %}</button>
         {% if snip %}
-        <form method="post" action="/feeds/{{ podcast.slug }}/snippets/{{ pos }}/delete">
-          <button class="danger" type="submit">Löschen</button>
-        </form>
+        <button class="danger" type="submit" formaction="/feeds/{{ podcast.slug }}/snippets/{{ pos }}/delete" formnovalidate>Löschen</button>
         {% endif %}
-      </div>
+      </form>
     </div>
     {% endfor %}
   </div>
