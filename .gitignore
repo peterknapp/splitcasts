@@ -16,3 +16,9 @@ data/splitcasts.db
 !assets/.gitkeep
 .DS_Store
 .pytest_cache/
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+credentials.json
