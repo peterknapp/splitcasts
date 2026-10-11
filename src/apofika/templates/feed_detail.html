@@ -195,10 +195,13 @@
 
   function applyProcessStatus(proc) {
     if (!proc) return;
-    const running = !!proc.running || proc.status === "running";
+    const running = !!proc.running;
     const msg = proc.message || (running ? "Verarbeitung läuft…" : "");
-    if (!msg && proc.status === "idle") {
+    if (!running && !msg) {
       processStatus.hidden = true;
+      processSpinner.hidden = true;
+      processBtn.disabled = false;
+      stopPolling();
       return;
     }
     processStatus.hidden = false;
@@ -206,8 +209,8 @@
     processSpinner.hidden = !running;
     processBtn.disabled = running;
     processStatus.classList.toggle("is-running", running);
-    processStatus.classList.toggle("is-done", proc.status === "done" && !running);
-    processStatus.classList.toggle("is-error", proc.status === "error" && !running);
+    processStatus.classList.toggle("is-done", !running && proc.status === "done");
+    processStatus.classList.toggle("is-error", !running && proc.status === "error");
     if (running) startPolling();
     else stopPolling();
   }
@@ -269,6 +272,7 @@
       episodesError.textContent = "Folgen konnten nicht geladen werden: " + (err.message || err);
     } finally {
       episodesLoading.hidden = true;
+      episodesLoading.setAttribute("hidden", "");
     }
   }
 

@@ -14,6 +14,8 @@
 }
 
 * { box-sizing: border-box; }
+/* Author display rules (e.g. .spinner, .loading-row) must not override [hidden]. */
+[hidden] { display: none !important; }
 body {
   margin: 0;
   min-height: 100vh;
