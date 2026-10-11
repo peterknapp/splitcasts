@@ -364,6 +364,26 @@ def create_app() -> FastAPI:
         flash(request, message, error=not started and "läuft bereits" not in message.lower())
         return RedirectResponse(f"/feeds/{slug}", status_code=303)
 
+    @app.post("/feeds/{slug}/process-status/dismiss")
+    async def feed_process_dismiss(request: Request, slug: str):
+        if (redir := require_auth(request)):
+            return redir
+        podcast = get_podcast_by_slug(slug)
+        if not podcast:
+            return JSONResponse({"ok": False, "error": "not_found"}, status_code=404)
+        if is_running(podcast.id):
+            return JSONResponse(
+                {"ok": False, "error": "running", "process": _process_status_payload(podcast.id)},
+                status_code=409,
+            )
+        set_process_run(
+            podcast.id,
+            status="idle",
+            message=None,
+            finished=True,
+        )
+        return JSONResponse({"ok": True, "process": _process_status_payload(podcast.id)})
+
     @app.get("/feeds/{slug}/snippets/{position}/audio")
     def snippet_audio(request: Request, slug: str, position: int):
         if (redir := require_auth(request)):

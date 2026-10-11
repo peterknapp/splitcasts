@@ -18,12 +18,16 @@ from apofika.paths import (
     ensure_dirs,
 )
 from apofika.pipeline import process_latest
+from apofika.runtime import limit_compute_threads
 
 app = typer.Typer(
     name="apofika",
     help="Splitcasts: chapter markers for podcast feeds.",
     add_completion=False,
 )
+
+# Cap BLAS/OpenMP early so heavy detection does not starve the Pi.
+limit_compute_threads(1)
 
 
 @app.command("download")
@@ -103,6 +107,41 @@ def process_all_cmd(
         return
     for result in results:
         typer.echo(f"[{result.slug}] {result.message}")
+
+
+@app.command("process-slug")
+def process_slug_cmd(
+    slug: str = typer.Argument(..., help="Podcast slug from the admin UI"),
+    force: bool = typer.Option(False, "--force"),
+    public_base: Optional[str] = typer.Option(None, "--public-base"),
+) -> None:
+    """Process one podcast (used by the web UI as a separate low-priority process)."""
+    from apofika.db import get_podcast_by_slug, init_db, set_process_run
+    from apofika.worker import process_podcast
+
+    init_db()
+    podcast = get_podcast_by_slug(slug)
+    if not podcast:
+        typer.echo(f"Unknown slug: {slug}", err=True)
+        raise typer.Exit(code=1)
+
+    set_process_run(
+        podcast.id,
+        status="running",
+        message=f"Verarbeite {podcast.title}…",
+        started=True,
+    )
+    result = process_podcast(podcast, force=force, base_url=public_base)
+    error = bool(result.error and not result.skipped)
+    set_process_run(
+        podcast.id,
+        status="error" if error else "done",
+        message=result.message,
+        finished=True,
+    )
+    typer.echo(result.message)
+    if error:
+        raise typer.Exit(code=1)
 
 
 @app.command("migrate")

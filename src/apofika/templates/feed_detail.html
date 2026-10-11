@@ -33,6 +33,7 @@
     >
       <span class="spinner" id="process-spinner" {% if not process_status.running %}hidden{% endif %} aria-hidden="true"></span>
       <p id="process-status-text">{{ process_status.message or '' }}</p>
+      <button type="button" class="process-dismiss" id="process-dismiss" title="Hinweis schließen" {% if process_status.running %}hidden{% endif %}>×</button>
     </div>
   </div>
 </section>
@@ -151,7 +152,9 @@
   const processStatus = document.getElementById("process-status");
   const processText = document.getElementById("process-status-text");
   const processSpinner = document.getElementById("process-spinner");
+  const processDismiss = document.getElementById("process-dismiss");
   let pollTimer = null;
+  let dismissTimer = null;
 
   function escapeHtml(value) {
     return String(value ?? "")
@@ -193,6 +196,25 @@
     if (!has) jingleEmpty.textContent = "Keine Episoden geladen — Vorschau erst nach erfolgreichem Feed-Abruf möglich.";
   }
 
+  async function dismissProcessStatus() {
+    if (dismissTimer) {
+      clearTimeout(dismissTimer);
+      dismissTimer = null;
+    }
+    processStatus.hidden = true;
+    processSpinner.hidden = true;
+    processDismiss.hidden = true;
+    processText.textContent = "";
+    processBtn.disabled = false;
+    try {
+      await fetch(`/feeds/${slug}/process-status/dismiss`, {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { Accept: "application/json" },
+      });
+    } catch (_) { /* ignore */ }
+  }
+
   function applyProcessStatus(proc) {
     if (!proc) return;
     const running = !!proc.running;
@@ -200,6 +222,7 @@
     if (!running && !msg) {
       processStatus.hidden = true;
       processSpinner.hidden = true;
+      processDismiss.hidden = true;
       processBtn.disabled = false;
       stopPolling();
       return;
@@ -207,12 +230,23 @@
     processStatus.hidden = false;
     processText.textContent = msg;
     processSpinner.hidden = !running;
+    processDismiss.hidden = running;
     processBtn.disabled = running;
     processStatus.classList.toggle("is-running", running);
     processStatus.classList.toggle("is-done", !running && proc.status === "done");
     processStatus.classList.toggle("is-error", !running && proc.status === "error");
-    if (running) startPolling();
-    else stopPolling();
+    if (running) {
+      if (dismissTimer) {
+        clearTimeout(dismissTimer);
+        dismissTimer = null;
+      }
+      startPolling();
+    } else {
+      stopPolling();
+      if (proc.status === "done" && !dismissTimer) {
+        dismissTimer = setTimeout(() => { dismissProcessStatus(); }, 12000);
+      }
+    }
   }
 
   function startPolling() {
@@ -275,6 +309,8 @@
       episodesLoading.setAttribute("hidden", "");
     }
   }
+
+  processDismiss.addEventListener("click", () => { dismissProcessStatus(); });
 
   processBtn.addEventListener("click", async () => {
     processBtn.disabled = true;

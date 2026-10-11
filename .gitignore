@@ -11,6 +11,7 @@ data/feeds/
 data/state.json
 data/feed.xml
 data/splitcasts.db
+data/jobs/
 *.mp3
 *.wav
 !assets/.gitkeep

@@ -253,7 +253,18 @@ button.danger { background: var(--danger); }
   background: #f4f1ea;
   border: 1px solid var(--line);
 }
-.process-status p { margin: 0; }
+.process-status p { margin: 0; flex: 1; }
+.process-dismiss {
+  flex: 0 0 auto;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font-size: 1.35rem;
+  line-height: 1;
+  padding: 0 0.15rem;
+  cursor: pointer;
+}
+.process-dismiss:hover { color: var(--ink); }
 .process-status.is-running { background: #fff6e4; border-color: #e2c48a; }
 .process-status.is-done { background: #eaf6ee; border-color: #9ec9ae; }
 .process-status.is-error { background: #f8eaea; border-color: #e0b4b4; }
