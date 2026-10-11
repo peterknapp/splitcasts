@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+import mimetypes
 import re
 import shutil
 from pathlib import Path
 
 from fastapi import FastAPI, File, Form, Request, UploadFile
-from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, Response
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
@@ -19,9 +20,11 @@ from apofika.db import (
     delete_snippet,
     get_episode_by_guid,
     get_podcast_by_slug,
+    get_process_run,
     init_db,
     list_podcasts,
     list_snippets,
+    set_process_run,
     suggest_slug,
     update_podcast_image,
     upsert_snippet,
@@ -29,6 +32,7 @@ from apofika.db import (
 )
 from apofika.fetch import channel_meta, fetch_parsed, parse_recent
 from apofika.formatting import format_published
+from apofika.jobs import is_running, start_process_job
 from apofika.paths import (
     STATIC_DIR,
     TEMPLATES_DIR,
@@ -39,7 +43,6 @@ from apofika.paths import (
     feed_snippets_dir,
     feed_xml_path,
 )
-from apofika.worker import process_podcast
 
 
 def _fetch_channel_image(source_rss_url: str) -> str | None:
@@ -58,6 +61,11 @@ STATUS_LABELS = {
     "purged": "gelöscht (Datei)",
     "unknown": "unbekannt",
 }
+
+
+def _wants_json(request: Request) -> bool:
+    accept = request.headers.get("accept", "")
+    return "application/json" in accept or request.query_params.get("format") == "json"
 
 
 def create_app() -> FastAPI:
@@ -237,26 +245,8 @@ def create_app() -> FastAPI:
             media_type="application/rss+xml; charset=utf-8",
         )
 
-    @app.get("/feeds/{slug}", response_class=HTMLResponse)
-    def feed_detail(request: Request, slug: str):
-        if (redir := require_auth(request)):
-            return redir
-        if slug.endswith(".xml") or not re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*", slug):
-            flash(request, "Feed nicht gefunden.", error=True)
-            return RedirectResponse("/", status_code=303)
-        podcast = get_podcast_by_slug(slug)
-        if not podcast:
-            flash(request, "Feed nicht gefunden.", error=True)
-            return RedirectResponse("/", status_code=303)
-
-        if not podcast.image_url:
-            image = _fetch_channel_image(podcast.source_rss_url)
-            if image:
-                update_podcast_image(podcast.id, image)
-                podcast.image_url = image
-
-        recent = []
-        recent_error = None
+    def _load_recent_episodes(podcast) -> tuple[list[dict], str | None]:
+        recent: list[dict] = []
         try:
             items, _ = parse_recent(podcast.source_rss_url, limit=UI_RECENT_EPISODES)
             for meta in items:
@@ -273,19 +263,83 @@ def create_app() -> FastAPI:
                         "error": ep.error_message if ep else None,
                     }
                 )
-        except Exception as exc:
-            recent_error = str(exc)
+            return recent, None
+        except Exception as exc:  # noqa: BLE001
+            return [], str(exc)
+
+    def _process_status_payload(podcast_id: int) -> dict:
+        run = get_process_run(podcast_id)
+        running = is_running(podcast_id)
+        # After a server restart the DB can still say "running" while no thread exists.
+        if run.status == "running" and not running:
+            run = set_process_run(
+                podcast_id,
+                status="error",
+                message="Verarbeitung wurde unterbrochen (Server-Neustart). Bitte erneut starten.",
+                finished=True,
+            )
+        return {
+            "status": run.status,
+            "message": run.message,
+            "started_at": run.started_at,
+            "finished_at": run.finished_at,
+            "running": running,
+        }
+
+    @app.get("/feeds/{slug}", response_class=HTMLResponse)
+    def feed_detail(request: Request, slug: str):
+        if (redir := require_auth(request)):
+            return redir
+        if slug.endswith(".xml") or not re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*", slug):
+            flash(request, "Feed nicht gefunden.", error=True)
+            return RedirectResponse("/", status_code=303)
+        podcast = get_podcast_by_slug(slug)
+        if not podcast:
+            flash(request, "Feed nicht gefunden.", error=True)
+            return RedirectResponse("/", status_code=303)
 
         snippets = {s.position: s for s in list_snippets(podcast.id)}
         return render(
             request,
             "feed_detail.html",
             podcast=podcast,
-            recent=recent,
-            recent_error=recent_error,
             snippets=snippets,
+            process_status=_process_status_payload(podcast.id),
             public_feed_url=f"{config.public_base()}/feeds/{podcast.slug}.xml",
         )
+
+    @app.get("/feeds/{slug}/episodes.json")
+    def feed_episodes_json(request: Request, slug: str):
+        if not request.session.get("auth"):
+            return JSONResponse({"error": "unauthorized"}, status_code=401)
+        podcast = get_podcast_by_slug(slug)
+        if not podcast:
+            return JSONResponse({"error": "not_found"}, status_code=404)
+
+        if not podcast.image_url:
+            image = _fetch_channel_image(podcast.source_rss_url)
+            if image:
+                update_podcast_image(podcast.id, image)
+                podcast.image_url = image
+
+        recent, recent_error = _load_recent_episodes(podcast)
+        return JSONResponse(
+            {
+                "episodes": recent,
+                "error": recent_error,
+                "image_url": podcast.image_url,
+                "process": _process_status_payload(podcast.id),
+            }
+        )
+
+    @app.get("/feeds/{slug}/process-status")
+    def feed_process_status(request: Request, slug: str):
+        if not request.session.get("auth"):
+            return JSONResponse({"error": "unauthorized"}, status_code=401)
+        podcast = get_podcast_by_slug(slug)
+        if not podcast:
+            return JSONResponse({"error": "not_found"}, status_code=404)
+        return JSONResponse(_process_status_payload(podcast.id))
 
     @app.post("/feeds/{slug}/process")
     async def feed_process(request: Request, slug: str):
@@ -293,11 +347,43 @@ def create_app() -> FastAPI:
             return redir
         podcast = get_podcast_by_slug(slug)
         if not podcast:
+            if _wants_json(request):
+                return JSONResponse({"ok": False, "error": "not_found"}, status_code=404)
             flash(request, "Feed nicht gefunden.", error=True)
             return RedirectResponse("/", status_code=303)
-        result = process_podcast(podcast, base_url=config.public_base())
-        flash(request, result.message, error=bool(result.error and not result.skipped))
+
+        started, message = start_process_job(podcast.id)
+        payload = {
+            "ok": True,
+            "started": started,
+            "message": message,
+            "process": _process_status_payload(podcast.id),
+        }
+        if _wants_json(request):
+            return JSONResponse(payload)
+        flash(request, message, error=not started and "läuft bereits" not in message.lower())
         return RedirectResponse(f"/feeds/{slug}", status_code=303)
+
+    @app.get("/feeds/{slug}/snippets/{position}/audio")
+    def snippet_audio(request: Request, slug: str, position: int):
+        if (redir := require_auth(request)):
+            return redir
+        podcast = get_podcast_by_slug(slug)
+        if not podcast or position < 1 or position > 3:
+            return Response("Not found", status_code=404)
+        snippets = {s.position: s for s in list_snippets(podcast.id)}
+        snip = snippets.get(position)
+        if not snip:
+            return Response("Not found", status_code=404)
+        path = feed_snippets_dir(podcast.slug) / snip.filename
+        if not path.exists():
+            return Response("Not found", status_code=404)
+        media_type, _ = mimetypes.guess_type(str(path))
+        return FileResponse(
+            path,
+            media_type=media_type or "application/octet-stream",
+            filename=snip.filename,
+        )
 
     @app.post("/feeds/{slug}/jingle/preview")
     async def jingle_preview(

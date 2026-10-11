@@ -1,5 +1,5 @@
 [Unit]
-Description=Check ApoFiKa feed for new episodes between 04:00 and 07:00
+Description=Splitcasts: check all active feeds between 04:00 and 07:00
 
 [Timer]
 # Every 30 minutes from 04:00 through 06:30, plus a final check at 07:00

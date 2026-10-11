@@ -5,9 +5,10 @@
   <div class="detail-head">
     <div class="podcast-identity">
       {% if podcast.image_url %}
-      <img class="podcast-cover lg" src="{{ podcast.image_url }}" alt="" width="56" height="56" loading="lazy">
+      <img id="podcast-cover" class="podcast-cover lg" src="{{ podcast.image_url }}" alt="" width="56" height="56" loading="lazy">
       {% else %}
-      <span class="podcast-cover lg placeholder" aria-hidden="true"></span>
+      <span id="podcast-cover-placeholder" class="podcast-cover lg placeholder" aria-hidden="true"></span>
+      <img id="podcast-cover" class="podcast-cover lg" alt="" width="56" height="56" loading="lazy" hidden>
       {% endif %}
       <h1 class="podcast-title">{{ podcast.title }}</h1>
     </div>
@@ -19,18 +20,31 @@
     >Feed-URL kopieren</button>
   </div>
   <p class="muted" style="margin-top:0.8rem">Quelle: <a href="{{ podcast.source_rss_url }}" target="_blank" rel="noopener">{{ podcast.source_rss_url }}</a></p>
-  <form method="post" action="/feeds/{{ podcast.slug }}/process" class="row" style="margin-top:1rem">
-    <button type="submit">Jetzt prüfen / verarbeiten</button>
-    <span class="muted">Neueste Folge laden, snippen, Output-Feed aktualisieren (max. 3 Dateien).</span>
-  </form>
+
+  <div class="process-panel" style="margin-top:1rem">
+    <div class="row">
+      <button type="button" id="process-btn">Jetzt prüfen / verarbeiten</button>
+      <span class="muted">Läuft im Hintergrund — die Seite bleibt bedienbar.</span>
+    </div>
+    <div
+      id="process-status"
+      class="process-status {% if process_status.status == 'error' %}is-error{% elif process_status.status == 'done' %}is-done{% elif process_status.running %}is-running{% endif %}"
+      {% if process_status.status == 'idle' and not process_status.message %}hidden{% endif %}
+    >
+      <span class="spinner" id="process-spinner" {% if not process_status.running %}hidden{% endif %} aria-hidden="true"></span>
+      <p id="process-status-text">{{ process_status.message or '' }}</p>
+    </div>
+  </div>
 </section>
 
 <section class="card">
   <h2>Letzte 5 Folgen</h2>
-  {% if recent_error %}
-  <p class="flash error">{{ recent_error }}</p>
-  {% endif %}
-  <table>
+  <div id="episodes-loading" class="loading-row">
+    <span class="spinner" aria-hidden="true"></span>
+    <span class="muted">Folgen werden geladen…</span>
+  </div>
+  <p id="episodes-error" class="flash error" hidden></p>
+  <table id="episodes-table" hidden>
     <thead>
       <tr>
         <th>Titel</th>
@@ -38,33 +52,16 @@
         <th>Status</th>
       </tr>
     </thead>
-    <tbody>
-      {% for item in recent %}
-      <tr>
-        <td>{{ item.title }}</td>
-        <td class="muted nowrap">{{ item.published_fmt }}</td>
-        <td><span class="badge {{ item.status }}">{{ item.status_label }}</span>
-          {% if item.error %}<div class="muted">{{ item.error }}</div>{% endif %}
-        </td>
-      </tr>
-      {% else %}
-      <tr><td colspan="3" class="muted">Keine Einträge geladen.</td></tr>
-      {% endfor %}
-    </tbody>
+    <tbody id="episodes-body"></tbody>
   </table>
 </section>
 
 <section class="card">
   <h2>Jingle aus Episode erstellen</h2>
   <p class="muted">Ausschnitt wählen, anhören und in einen Snippet-Slot speichern. Beim ersten Mal wird die Episode ggf. heruntergeladen.</p>
-  {% if recent %}
-  <form id="jingle-editor" class="stack" style="margin-top:1rem" method="post" action="/feeds/{{ podcast.slug }}/jingle/save">
+  <form id="jingle-editor" class="stack" style="margin-top:1rem" method="post" action="/feeds/{{ podcast.slug }}/jingle/save" hidden>
     <label>Episode
-      <select name="guid" required>
-        {% for item in recent %}
-        <option value="{{ item.guid }}">{{ item.title }} ({{ item.published_fmt }})</option>
-        {% endfor %}
-      </select>
+      <select name="guid" id="jingle-guid" required></select>
     </label>
     <div class="row editor-fields">
       <label>Start (MM:SS)
@@ -88,9 +85,7 @@
     <p id="jingle-editor-status" class="muted" hidden></p>
     <audio id="jingle-preview-audio" controls style="width:100%; margin-top:0.5rem" hidden></audio>
   </form>
-  {% else %}
-  <p class="muted">Keine Episoden geladen — Vorschau erst nach erfolgreichem Feed-Abruf möglich.</p>
-  {% endif %}
+  <p id="jingle-editor-empty" class="muted">Warte auf Episodenliste…</p>
 </section>
 
 <section class="card">
@@ -100,6 +95,7 @@
     <thead>
       <tr>
         <th>Slot</th>
+        <th>Anhören</th>
         <th>Datei</th>
         <th>Aktion</th>
         <th></th>
@@ -112,6 +108,13 @@
         <td class="snippet-slot">
           <strong>{{ pos }}</strong>
           <span class="muted mono">{% if snip %}{{ snip.filename }}{% else %}leer{% endif %}</span>
+        </td>
+        <td class="snippet-audio-cell">
+          {% if snip %}
+          <audio class="snippet-audio" controls preload="none" src="/feeds/{{ podcast.slug }}/snippets/{{ pos }}/audio"></audio>
+          {% else %}
+          <span class="muted">—</span>
+          {% endif %}
         </td>
         <td>
           <form id="snippet-form-{{ pos }}" method="post" action="/feeds/{{ podcast.slug }}/snippets/{{ pos }}" enctype="multipart/form-data">
@@ -136,40 +139,201 @@
 
 <script>
 (() => {
-  const form = document.getElementById("jingle-editor");
-  const btn = document.getElementById("jingle-preview-btn");
-  const audio = document.getElementById("jingle-preview-audio");
-  const status = document.getElementById("jingle-editor-status");
-  if (!form || !btn || !audio) return;
+  const slug = {{ podcast.slug|tojson }};
+  const episodesLoading = document.getElementById("episodes-loading");
+  const episodesError = document.getElementById("episodes-error");
+  const episodesTable = document.getElementById("episodes-table");
+  const episodesBody = document.getElementById("episodes-body");
+  const jingleForm = document.getElementById("jingle-editor");
+  const jingleGuid = document.getElementById("jingle-guid");
+  const jingleEmpty = document.getElementById("jingle-editor-empty");
+  const processBtn = document.getElementById("process-btn");
+  const processStatus = document.getElementById("process-status");
+  const processText = document.getElementById("process-status-text");
+  const processSpinner = document.getElementById("process-spinner");
+  let pollTimer = null;
 
-  btn.addEventListener("click", async () => {
-    status.hidden = false;
-    status.textContent = "Vorschau wird erzeugt (Episode wird ggf. geladen)…";
-    btn.disabled = true;
+  function escapeHtml(value) {
+    return String(value ?? "")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;");
+  }
+
+  function renderEpisodes(episodes) {
+    episodesBody.innerHTML = "";
+    if (!episodes.length) {
+      episodesBody.innerHTML = '<tr><td colspan="3" class="muted">Keine Einträge geladen.</td></tr>';
+    } else {
+      for (const item of episodes) {
+        const err = item.error
+          ? `<div class="muted">${escapeHtml(item.error)}</div>`
+          : "";
+        const tr = document.createElement("tr");
+        tr.innerHTML = `
+          <td>${escapeHtml(item.title)}</td>
+          <td class="muted nowrap">${escapeHtml(item.published_fmt)}</td>
+          <td><span class="badge ${escapeHtml(item.status)}">${escapeHtml(item.status_label)}</span>${err}</td>
+        `;
+        episodesBody.appendChild(tr);
+      }
+    }
+    episodesTable.hidden = false;
+    jingleGuid.innerHTML = "";
+    for (const item of episodes) {
+      const opt = document.createElement("option");
+      opt.value = item.guid;
+      opt.textContent = `${item.title} (${item.published_fmt})`;
+      jingleGuid.appendChild(opt);
+    }
+    const has = episodes.length > 0;
+    jingleForm.hidden = !has;
+    jingleEmpty.hidden = has;
+    if (!has) jingleEmpty.textContent = "Keine Episoden geladen — Vorschau erst nach erfolgreichem Feed-Abruf möglich.";
+  }
+
+  function applyProcessStatus(proc) {
+    if (!proc) return;
+    const running = !!proc.running || proc.status === "running";
+    const msg = proc.message || (running ? "Verarbeitung läuft…" : "");
+    if (!msg && proc.status === "idle") {
+      processStatus.hidden = true;
+      return;
+    }
+    processStatus.hidden = false;
+    processText.textContent = msg;
+    processSpinner.hidden = !running;
+    processBtn.disabled = running;
+    processStatus.classList.toggle("is-running", running);
+    processStatus.classList.toggle("is-done", proc.status === "done" && !running);
+    processStatus.classList.toggle("is-error", proc.status === "error" && !running);
+    if (running) startPolling();
+    else stopPolling();
+  }
+
+  function startPolling() {
+    if (pollTimer) return;
+    pollTimer = setInterval(async () => {
+      try {
+        const res = await fetch(`/feeds/${slug}/process-status`, { credentials: "same-origin" });
+        if (!res.ok) return;
+        const proc = await res.json();
+        const wasRunning = processBtn.disabled;
+        applyProcessStatus(proc);
+        if (wasRunning && !proc.running) {
+          await loadEpisodes({ silent: true });
+        }
+      } catch (_) { /* ignore transient poll errors */ }
+    }, 2000);
+  }
+
+  function stopPolling() {
+    if (!pollTimer) return;
+    clearInterval(pollTimer);
+    pollTimer = null;
+  }
+
+  async function loadEpisodes({ silent = false } = {}) {
+    if (!silent) {
+      episodesLoading.hidden = false;
+      episodesError.hidden = true;
+      episodesTable.hidden = true;
+    }
     try {
-      const res = await fetch("/feeds/{{ podcast.slug }}/jingle/preview", {
+      const res = await fetch(`/feeds/${slug}/episodes.json`, { credentials: "same-origin" });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || ("HTTP " + res.status));
+      if (data.error) {
+        episodesError.hidden = false;
+        episodesError.textContent = data.error;
+        jingleForm.hidden = true;
+        jingleEmpty.hidden = false;
+        jingleEmpty.textContent = "Keine Episoden geladen — Vorschau erst nach erfolgreichem Feed-Abruf möglich.";
+      } else {
+        episodesError.hidden = true;
+        renderEpisodes(data.episodes || []);
+      }
+      if (data.image_url) {
+        const cover = document.getElementById("podcast-cover");
+        const placeholder = document.getElementById("podcast-cover-placeholder");
+        if (cover) {
+          cover.src = data.image_url;
+          cover.hidden = false;
+        }
+        if (placeholder) placeholder.hidden = true;
+      }
+      if (data.process) applyProcessStatus(data.process);
+    } catch (err) {
+      episodesError.hidden = false;
+      episodesError.textContent = "Folgen konnten nicht geladen werden: " + (err.message || err);
+    } finally {
+      episodesLoading.hidden = true;
+    }
+  }
+
+  processBtn.addEventListener("click", async () => {
+    processBtn.disabled = true;
+    processStatus.hidden = false;
+    processSpinner.hidden = false;
+    processStatus.classList.add("is-running");
+    processStatus.classList.remove("is-done", "is-error");
+    processText.textContent = "Verarbeitung wird gestartet…";
+    try {
+      const res = await fetch(`/feeds/${slug}/process?format=json`, {
         method: "POST",
-        body: new FormData(form),
+        headers: { Accept: "application/json" },
         credentials: "same-origin",
       });
-      if (!res.ok) {
-        const msg = await res.text();
-        throw new Error(msg || ("HTTP " + res.status));
-      }
-      const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
-      if (audio.dataset.objectUrl) URL.revokeObjectURL(audio.dataset.objectUrl);
-      audio.dataset.objectUrl = url;
-      audio.src = url;
-      audio.hidden = false;
-      await audio.play();
-      status.textContent = "Vorschau bereit.";
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || ("HTTP " + res.status));
+      applyProcessStatus(data.process || { running: true, status: "running", message: data.message });
+      startPolling();
     } catch (err) {
-      status.textContent = "Vorschau fehlgeschlagen: " + (err.message || err);
-    } finally {
-      btn.disabled = false;
+      processSpinner.hidden = true;
+      processBtn.disabled = false;
+      processStatus.classList.remove("is-running");
+      processStatus.classList.add("is-error");
+      processText.textContent = "Start fehlgeschlagen: " + (err.message || err);
     }
   });
+
+  const previewBtn = document.getElementById("jingle-preview-btn");
+  const audio = document.getElementById("jingle-preview-audio");
+  const status = document.getElementById("jingle-editor-status");
+  if (previewBtn && audio && jingleForm) {
+    previewBtn.addEventListener("click", async () => {
+      status.hidden = false;
+      status.textContent = "Vorschau wird erzeugt (Episode wird ggf. geladen)…";
+      previewBtn.disabled = true;
+      try {
+        const res = await fetch(`/feeds/${slug}/jingle/preview`, {
+          method: "POST",
+          body: new FormData(jingleForm),
+          credentials: "same-origin",
+        });
+        if (!res.ok) {
+          const msg = await res.text();
+          throw new Error(msg || ("HTTP " + res.status));
+        }
+        const blob = await res.blob();
+        const url = URL.createObjectURL(blob);
+        if (audio.dataset.objectUrl) URL.revokeObjectURL(audio.dataset.objectUrl);
+        audio.dataset.objectUrl = url;
+        audio.src = url;
+        audio.hidden = false;
+        await audio.play();
+        status.textContent = "Vorschau bereit.";
+      } catch (err) {
+        status.textContent = "Vorschau fehlgeschlagen: " + (err.message || err);
+      } finally {
+        previewBtn.disabled = false;
+      }
+    });
+  }
+
+  applyProcessStatus({{ process_status|tojson }});
+  loadEpisodes();
 })();
 </script>
 {% endblock %}

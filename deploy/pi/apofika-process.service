@@ -1,5 +1,5 @@
 [Unit]
-Description=ApoFiKa check/process latest episode
+Description=Splitcasts: process latest episode for all active feeds
 After=network-online.target
 Wants=network-online.target
 
@@ -12,4 +12,5 @@ Group=pi
 Nice=10
 IOSchedulingClass=best-effort
 IOSchedulingPriority=7
+# Must be process-all (multi-feed). Legacy `process` only hits the old ApoFiKa pipeline.
 ExecStart=/bin/bash -lc 'cd "$APOFIKA_HOME" && exec .venv/bin/apofika process-all --public-base "${SPLITCASTS_PUBLIC_BASE:-$APOFIKA_PUBLIC_BASE}"'

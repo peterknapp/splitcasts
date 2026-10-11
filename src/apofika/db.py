@@ -51,6 +51,15 @@ class Episode:
     processed_at: str | None
 
 
+@dataclass
+class ProcessRun:
+    podcast_id: int
+    status: str  # idle | running | done | error
+    message: str | None
+    started_at: str | None
+    finished_at: str | None
+
+
 def _connect(path: Path | None = None) -> sqlite3.Connection:
     ensure_dirs()
     db = path or db_path()
@@ -111,6 +120,13 @@ def init_db(path: Path | None = None) -> None:
             );
             CREATE INDEX IF NOT EXISTS idx_episodes_podcast_status
               ON episodes(podcast_id, status);
+            CREATE TABLE IF NOT EXISTS process_runs (
+              podcast_id INTEGER PRIMARY KEY REFERENCES podcasts(id) ON DELETE CASCADE,
+              status TEXT NOT NULL DEFAULT 'idle',
+              message TEXT,
+              started_at TEXT,
+              finished_at TEXT
+            );
             """
         )
         cols = {
@@ -373,6 +389,65 @@ def mark_episode_purged(episode_id: int) -> None:
             """,
             (episode_id,),
         )
+
+
+def get_process_run(podcast_id: int) -> ProcessRun:
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT * FROM process_runs WHERE podcast_id = ?",
+            (podcast_id,),
+        ).fetchone()
+    if not row:
+        return ProcessRun(
+            podcast_id=podcast_id,
+            status="idle",
+            message=None,
+            started_at=None,
+            finished_at=None,
+        )
+    return ProcessRun(
+        podcast_id=row["podcast_id"],
+        status=row["status"],
+        message=row["message"],
+        started_at=row["started_at"],
+        finished_at=row["finished_at"],
+    )
+
+
+def set_process_run(
+    podcast_id: int,
+    *,
+    status: str,
+    message: str | None = None,
+    started: bool = False,
+    finished: bool = False,
+) -> ProcessRun:
+    now = _now()
+    with get_conn() as conn:
+        existing = conn.execute(
+            "SELECT * FROM process_runs WHERE podcast_id = ?",
+            (podcast_id,),
+        ).fetchone()
+        started_at = now if started else (existing["started_at"] if existing else None)
+        finished_at = now if finished else (None if started else (existing["finished_at"] if existing else None))
+        if existing:
+            conn.execute(
+                """
+                UPDATE process_runs
+                SET status = ?, message = ?, started_at = ?, finished_at = ?
+                WHERE podcast_id = ?
+                """,
+                (status, message, started_at, finished_at, podcast_id),
+            )
+        else:
+            conn.execute(
+                """
+                INSERT INTO process_runs (podcast_id, status, message, started_at, finished_at)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (podcast_id, status, message, started_at, finished_at),
+            )
+    return get_process_run(podcast_id)
 
 
 def _episode(row: sqlite3.Row) -> Episode:
