@@ -182,7 +182,13 @@ def process_podcast(
         )
 
     existing = get_episode_by_guid(podcast.id, meta.guid)
-    if existing and existing.status == "split" and not force:
+    if (
+        existing
+        and existing.status == "split"
+        and not force
+        and existing.processed_path
+        and Path(existing.processed_path).exists()
+    ):
         rebuild_podcast_feed(podcast, base_url=base_url)
         return ProcessResult(
             skipped=True,

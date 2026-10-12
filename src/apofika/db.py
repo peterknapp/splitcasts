@@ -364,16 +364,29 @@ def upsert_episode(
 
 
 def list_split_episodes(podcast_id: int, limit: int | None = None) -> list[Episode]:
-    sql = """
-      SELECT * FROM episodes
-      WHERE podcast_id = ? AND status = 'split' AND processed_path IS NOT NULL
-      ORDER BY COALESCE(published_at, processed_at, '') DESC, id DESC
+    """Newest-first split episodes.
+
+    Important: do not ORDER BY published_at as text — RFC822 day names
+    (Mon/Thu/…) sort lexicographically and can purge the newest episode.
     """
-    if limit is not None:
-        sql += f" LIMIT {int(limit)}"
+    from apofika.formatting import episode_recency_key
+
     with get_conn() as conn:
-        rows = conn.execute(sql, (podcast_id,)).fetchall()
-    return [_episode(r) for r in rows]
+        rows = conn.execute(
+            """
+            SELECT * FROM episodes
+            WHERE podcast_id = ? AND status = 'split' AND processed_path IS NOT NULL
+            """,
+            (podcast_id,),
+        ).fetchall()
+    episodes = [_episode(r) for r in rows]
+    episodes.sort(
+        key=lambda ep: episode_recency_key(ep.published_at, ep.processed_at, ep.id),
+        reverse=True,
+    )
+    if limit is not None:
+        return episodes[: int(limit)]
+    return episodes
 
 
 def mark_episode_purged(episode_id: int) -> None:
