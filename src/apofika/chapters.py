@@ -68,17 +68,18 @@ def build_chapters(
     topics: list[str],
     jingle_times: list[float],
     include_outro: bool = False,
+    *,
+    intro_grace_sec: float = 60.0,
 ) -> tuple[list[Chapter], list[str]]:
     """
     Mapping:
       Intro @ 0
-      topics[0] @ 0 as well? No — Intro covers opening; first topic starts at first jingle
-        OR first topic at 0 and subsequent topics at jingels.
+      Thema[i] @ topic-jingle[i]
 
-    Plan says: Intro @ 0; then Thema[i] @ jingle[i].
-    So topics are assigned starting at jingle hits. Extra topics after last jingle
-    get folded into a warning; if more jingels than topics, leftover hits get
-    generic titles.
+    Many shows play the same jingle once as an opening sting (still inside the
+    intro). If the first hit falls within ``intro_grace_sec``, it is treated as
+    that intro bumper and *not* paired with topics[0] — otherwise every title
+    shifts forward by one ("current chapter shows the next topic").
     """
     warnings: list[str] = []
     chapters: list[Chapter] = [Chapter(start=0.0, title="Intro")]
@@ -87,38 +88,38 @@ def build_chapters(
         warnings.append("No topics and no jingles detected")
         return chapters, warnings
 
-    # Assign topic i to jingle i (topic 0 starts after first jingle = first theme block)
-    # If we have N topics and N-1 expected separators between them after intro:
-    #   jingle[0] -> topics[0], jingle[1] -> topics[1], ...
-    for i, t in enumerate(jingle_times):
+    times = [float(t) for t in jingle_times]
+    topic_times = times
+    if times and times[0] < intro_grace_sec:
+        warnings.append(
+            f"Leading jingle at {times[0]:.1f}s treated as intro bumper "
+            f"(<{intro_grace_sec:.0f}s); topics start at later hits."
+        )
+        topic_times = times[1:]
+
+    for i, t in enumerate(topic_times):
         if i < len(topics):
             title = topics[i]
         else:
             title = f"Segment {i + 1}"
             warnings.append(f"No topic for jingle at {t:.1f}s — using '{title}'")
-        chapters.append(Chapter(start=float(t), title=title))
+        chapters.append(Chapter(start=t, title=title))
 
-    unused = topics[len(jingle_times) :]
+    unused = topics[len(topic_times) :]
     if unused:
         warnings.append(
             f"{len(unused)} topic(s) without jingle timestamps: {unused}"
         )
-        # Attach remaining topics as a combined last chapter title hint
-        if include_outro and chapters:
-            pass
-        # Append leftover topics starting at last chapter end marker is unknown;
-        # keep them only in warnings for MVP unless include_outro with last topic names
-        if unused and jingle_times:
+        if unused and topic_times:
             # extend last chapter title with leftover themes for discoverability
             extra = " / ".join(unused)
             chapters[-1] = Chapter(
                 start=chapters[-1].start,
                 title=f"{chapters[-1].title} (+ {extra})",
             )
-        elif unused and not jingle_times:
-            # no jingels: put first topic at 0 replacing Intro subtitle style
+        elif unused and not topic_times:
             chapters = [Chapter(start=0.0, title=topics[0])]
-            for idx, topic in enumerate(topics[1:], start=1):
+            for topic in topics[1:]:
                 warnings.append(f"Topic without timestamp skipped/merged: {topic}")
             if len(topics) > 1:
                 chapters[0] = Chapter(
@@ -126,11 +127,9 @@ def build_chapters(
                     title=" / ".join(topics),
                 )
 
-    expected = max(len(topics) - 0, 0)
-    if topics and jingle_times and abs(len(jingle_times) - len(topics)) > 1:
+    if topics and topic_times and abs(len(topic_times) - len(topics)) > 1:
         warnings.append(
-            f"Jingle count ({len(jingle_times)}) differs from topic count ({len(topics)}); "
-            f"expected roughly {expected} separators"
+            f"Jingle count ({len(topic_times)}) differs from topic count ({len(topics)})"
         )
 
     # Deduplicate identical consecutive starts
