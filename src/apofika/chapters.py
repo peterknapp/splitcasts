@@ -1,4 +1,4 @@
-"""Parse show-note topics and map them onto jingle timestamps."""
+"""Build numbered chapter cut marks from jingle timestamps."""
 
 from __future__ import annotations
 
@@ -38,6 +38,7 @@ def strip_html(text: str) -> str:
 
 
 def parse_topics(description: str) -> list[str]:
+    """Extract show-note topics (kept for metadata / debugging only)."""
     plain = strip_html(description)
     match = TOPIC_HEADER_RE.search(plain) or TOPIC_HEADER_RE.search(description)
     if not match:
@@ -47,7 +48,6 @@ def parse_topics(description: str) -> list[str]:
     if not blob:
         return []
 
-    # Prefer semicolon-separated topics (ApoFiKa style)
     if ";" in blob:
         parts = blob.split(";")
     else:
@@ -68,68 +68,37 @@ def build_chapters(
     topics: list[str],
     jingle_times: list[float],
     include_outro: bool = False,
-    *,
-    intro_grace_sec: float = 60.0,
+    **_kwargs,
 ) -> tuple[list[Chapter], list[str]]:
     """
-    Mapping:
-      Intro @ 0
-      Thema[i] @ topic-jingle[i]
+    Cut marks only — no show-note title mapping.
 
-    Many shows play the same jingle once as an opening sting (still inside the
-    intro). If the first hit falls within ``intro_grace_sec``, it is treated as
-    that intro bumper and *not* paired with topics[0] — otherwise every title
-    shifts forward by one ("current chapter shows the next topic").
+      Intro @ 0
+      1, 2, 3, … @ each jingle hit (in order)
+
+    ``topics`` is ignored for titles (still accepted for call-site compatibility).
     """
     warnings: list[str] = []
     chapters: list[Chapter] = [Chapter(start=0.0, title="Intro")]
 
-    if not topics and not jingle_times:
-        warnings.append("No topics and no jingles detected")
+    times = sorted({float(t) for t in jingle_times if float(t) >= 0.0})
+    # Ignore hits that collide with Intro (same second)
+    times = [t for t in times if t >= 0.5]
+
+    if not times:
+        warnings.append("No jingles detected — only Intro chapter")
+        if topics:
+            warnings.append(
+                f"{len(topics)} show-note topic(s) ignored (numbered cuts only)"
+            )
         return chapters, warnings
 
-    times = [float(t) for t in jingle_times]
-    topic_times = times
-    if times and times[0] < intro_grace_sec:
-        warnings.append(
-            f"Leading jingle at {times[0]:.1f}s treated as intro bumper "
-            f"(<{intro_grace_sec:.0f}s); topics start at later hits."
-        )
-        topic_times = times[1:]
+    for i, t in enumerate(times, start=1):
+        chapters.append(Chapter(start=t, title=str(i)))
 
-    for i, t in enumerate(topic_times):
-        if i < len(topics):
-            title = topics[i]
-        else:
-            title = f"Segment {i + 1}"
-            warnings.append(f"No topic for jingle at {t:.1f}s — using '{title}'")
-        chapters.append(Chapter(start=t, title=title))
-
-    unused = topics[len(topic_times) :]
-    if unused:
+    if topics:
         warnings.append(
-            f"{len(unused)} topic(s) without jingle timestamps: {unused}"
-        )
-        if unused and topic_times:
-            # extend last chapter title with leftover themes for discoverability
-            extra = " / ".join(unused)
-            chapters[-1] = Chapter(
-                start=chapters[-1].start,
-                title=f"{chapters[-1].title} (+ {extra})",
-            )
-        elif unused and not topic_times:
-            chapters = [Chapter(start=0.0, title=topics[0])]
-            for topic in topics[1:]:
-                warnings.append(f"Topic without timestamp skipped/merged: {topic}")
-            if len(topics) > 1:
-                chapters[0] = Chapter(
-                    start=0.0,
-                    title=" / ".join(topics),
-                )
-
-    if topics and topic_times and abs(len(topic_times) - len(topics)) > 1:
-        warnings.append(
-            f"Jingle count ({len(topic_times)}) differs from topic count ({len(topics)})"
+            f"{len(topics)} show-note topic(s) ignored (numbered cuts only)"
         )
 
     # Deduplicate identical consecutive starts
@@ -139,12 +108,6 @@ def build_chapters(
             deduped[-1] = ch
         else:
             deduped.append(ch)
-
-    if include_outro and deduped:
-        # Outro only if last jingle isn't already near end — placeholder title
-        # without knowing duration we skip automatic outro unless explicitly wanted
-        # with a synthetic +1s mark which players dislike; so no-op unless times allow.
-        pass
 
     return deduped, warnings
 
