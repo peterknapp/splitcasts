@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import shutil
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -97,6 +97,7 @@ def rebuild_podcast_feed(podcast: Podcast, base_url: str | None = None) -> Path:
             enclosure_type="audio/mpeg",
             enclosure_length=mp3.stat().st_size,
             duration=data.get("duration"),
+            # Prefer channel badge later; keep raw only as interim fallback.
             image_url=data.get("image_url"),
             author=data.get("author"),
             episode_number=data.get("episode_number"),
@@ -130,7 +131,13 @@ def rebuild_podcast_feed(podcast: Podcast, base_url: str | None = None) -> Path:
 
     cover = refresh_badged_cover(podcast.slug, source_image)
     if cover and cover.exists():
-        channel["image"] = f"{base}/covers/{podcast.slug}.jpg"
+        badged_url = f"{base}/covers/{podcast.slug}.jpg"
+        channel["image"] = badged_url
+        # Episode artwork often wins in apps — force the badge there too.
+        episodes_out = [
+            (replace(m, image_url=badged_url), path, chs)
+            for m, path, chs in episodes_out
+        ]
     elif source_image:
         channel["image"] = source_image
 
