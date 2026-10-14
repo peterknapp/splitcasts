@@ -57,9 +57,12 @@ def _snippet_paths(podcast: Podcast) -> list[Path]:
 
 
 def rebuild_podcast_feed(podcast: Podcast, base_url: str | None = None) -> Path:
+    from apofika.cover import placeholder_mp3_path, refresh_badged_cover
+
     ensure_feed_dirs(podcast.slug)
     base = (base_url or public_base()).rstrip("/")
     episodes_out: list[tuple[EpisodeMeta, Path, list[Chapter]]] = []
+    source_image = podcast.image_url
     channel = {
         "title": f"{podcast.title} (Splitcasts)",
         "link": f"{base}/feeds/{podcast.slug}",
@@ -79,9 +82,8 @@ def rebuild_podcast_feed(podcast: Podcast, base_url: str | None = None) -> Path:
             continue
         data = json.loads(chapters_file.read_text(encoding="utf-8"))
         chapters = [Chapter(start=c["start"], title=c["title"]) for c in data["chapters"]]
-        # Prefer stored channel image from chapters json if present
-        if data.get("image_url") and not channel["image"]:
-            channel["image"] = data["image_url"]
+        if data.get("image_url") and not source_image:
+            source_image = data["image_url"]
         if data.get("author"):
             channel["author"] = data["author"]
         meta = EpisodeMeta(
@@ -101,7 +103,37 @@ def rebuild_podcast_feed(podcast: Podcast, base_url: str | None = None) -> Path:
         )
         episodes_out.append((meta, mp3, chapters))
 
-    # Custom media URLs: write_feed uses /media/{filename} — override via wrapper
+    # Overcast (and others) often reject feeds with zero <item>s — keep a silent stub.
+    if not episodes_out:
+        stub = placeholder_mp3_path(podcast.slug)
+        if stub.exists():
+            now = datetime.now(timezone.utc).strftime("%a, %d %b %Y %H:%M:%S +0000")
+            meta = EpisodeMeta(
+                guid=f"splitcasts-placeholder-{podcast.slug}",
+                title="Noch keine Folge — Splitcasts ist bereit",
+                description=(
+                    "Dieser Feed hat noch keine konvertierte Episode. "
+                    "Sobald Splitcasts die erste Folge verarbeitet hat, erscheint sie hier."
+                ),
+                summary="Platzhalter, damit der Feed in Podcast-Apps abonnierbar ist.",
+                link=channel["link"],
+                published=now,
+                enclosure_url="",
+                enclosure_type="audio/mpeg",
+                enclosure_length=stub.stat().st_size,
+                duration=2,
+                image_url=None,
+                author="Splitcasts",
+                episode_number=None,
+            )
+            episodes_out.append((meta, stub, [Chapter(start=0.0, title="Intro")]))
+
+    cover = refresh_badged_cover(podcast.slug, source_image)
+    if cover and cover.exists():
+        channel["image"] = f"{base}/covers/{podcast.slug}.jpg"
+    elif source_image:
+        channel["image"] = source_image
+
     return _write_slug_feed(podcast.slug, channel, episodes_out, base)
 
 

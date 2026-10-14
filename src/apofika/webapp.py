@@ -212,6 +212,9 @@ def create_app() -> FastAPI:
                 image_url=image or None,
             )
             ensure_feed_dirs(podcast.slug)
+            from apofika.worker import rebuild_podcast_feed
+
+            rebuild_podcast_feed(podcast, base_url=config.public_base())
             flash(request, f"Feed „{podcast.title}“ angelegt.")
             return RedirectResponse(f"/feeds/{podcast.slug}", status_code=303)
         except Exception as exc:
@@ -502,6 +505,23 @@ def create_app() -> FastAPI:
         flash(request, f"Snippet {position} gelöscht.")
         return RedirectResponse(f"/feeds/{slug}", status_code=303)
 
+    @app.get("/covers/{slug}.jpg")
+    def public_cover(slug: str):
+        safe_slug = Path(slug).name
+        if not re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*", safe_slug):
+            return Response("Not found", status_code=404)
+        from apofika.cover import cover_path, ensure_badged_cover
+
+        path = cover_path(safe_slug)
+        if not path.exists():
+            podcast = get_podcast_by_slug(safe_slug)
+            if podcast and podcast.image_url:
+                ensure_badged_cover(podcast.slug, podcast.image_url)
+                path = cover_path(safe_slug)
+        if not path.exists() or not path.is_file():
+            return Response("Not found", status_code=404)
+        return FileResponse(path, media_type="image/jpeg")
+
     @app.get("/media/{slug}/{filename}")
     def public_media(slug: str, filename: str):
         safe_slug = Path(slug).name
@@ -509,7 +529,12 @@ def create_app() -> FastAPI:
         path = feed_processed_dir(safe_slug) / safe_name
         if not path.exists() or not path.is_file():
             return Response("Not found", status_code=404)
-        return FileResponse(path, media_type="audio/mpeg", filename=safe_name)
+        media = "audio/mpeg"
+        if safe_name.lower().endswith((".jpg", ".jpeg")):
+            media = "image/jpeg"
+        elif safe_name.lower().endswith(".png"):
+            media = "image/png"
+        return FileResponse(path, media_type=media, filename=safe_name)
 
     # Back-compat for old single-feed URL
     @app.get("/feed.xml")

@@ -15,6 +15,7 @@ data/jobs/
 *.mp3
 *.wav
 !assets/.gitkeep
+!assets/placeholder.mp3
 .DS_Store
 .pytest_cache/
 .env
