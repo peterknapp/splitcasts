@@ -15,7 +15,7 @@ Typischer Einsatz: privat auf dem eigenen Rechner oder einem Raspberry Pi, optio
 - Detailansicht: letzte Folgen + Split-Status
 - Pro Podcast ein Output-Feed: `/feeds/{slug}.xml`
 - Max. 3 physische Episoden pro Feed (ältere Dateien werden gelöscht)
-- Optionaler Timer (z. B. 04:00–07:00) für `process-all`
+- Optionaler Timer (00:00–08:00, alle 15 Min.) für `process-all`
 
 ## Voraussetzungen
 
