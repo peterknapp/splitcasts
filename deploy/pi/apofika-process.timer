@@ -1,10 +1,9 @@
 [Unit]
-Description=Splitcasts: check all active feeds between 00:00 and 08:00
+Description=Splitcasts: check all active feeds every 30 minutes
 
 [Timer]
-# Every 15 minutes from 00:00 through 07:45, plus a final check at 08:00
-OnCalendar=*-*-* 00..07:00/15:00
-OnCalendar=*-*-* 08:00:00
+# Every 30 minutes, all day
+OnCalendar=*-*-* *:00/30:00
 Persistent=true
 Unit=apofika-process.service
 
