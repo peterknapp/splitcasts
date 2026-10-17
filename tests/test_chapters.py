@@ -17,14 +17,13 @@ def test_parse_topics_html():
     assert parse_topics(desc) == ["Eins", "Zwei", "Drei"]
 
 
-def test_build_chapters_numbered_cuts():
+def test_build_chapters_numbered_no_intro():
     chapters, warnings = build_chapters(
-        ["Alpha", "Beta", "Gamma"],
-        [100.0, 200.0, 14.0],
+        ["Alpha", "Beta"],
+        [14.0, 100.0, 200.0],
     )
-    assert chapters[0].title == "Intro"
-    assert chapters[0].start == 0.0
-    assert [(c.start, c.title) for c in chapters[1:]] == [
+    assert all(c.title != "Intro" for c in chapters)
+    assert [(c.start, c.title) for c in chapters] == [
         (14.0, "1"),
         (100.0, "2"),
         (200.0, "3"),
@@ -34,7 +33,5 @@ def test_build_chapters_numbered_cuts():
 
 def test_build_chapters_no_jingles():
     chapters, warnings = build_chapters([], [])
-    assert len(chapters) == 1
-    assert chapters[0].title == "Intro"
-    assert chapters[0].start == 0.0
+    assert chapters == []
     assert any("no jingles" in w.lower() for w in warnings)

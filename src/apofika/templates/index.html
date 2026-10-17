@@ -2,6 +2,41 @@
 {% block title %}Feeds · Splitcasts{% endblock %}
 {% block content %}
 <section class="card">
+  <div class="detail-head">
+    <h1>Pipeline</h1>
+    <span class="muted" id="pipeline-summary">
+      {{ pipeline.running }} aktiv · {{ pipeline.pending }} wartend
+    </span>
+  </div>
+  <p class="muted">Globale Warteschlange — Episoden werden nacheinander konvertiert.</p>
+  <div id="pipeline-loading" class="loading-row" hidden>
+    <span class="spinner" aria-hidden="true"></span>
+    <span class="muted">Pipeline wird aktualisiert…</span>
+  </div>
+  <table id="pipeline-table" {% if not pipeline.jobs %}hidden{% endif %}>
+    <thead>
+      <tr>
+        <th>Status</th>
+        <th>Podcast</th>
+        <th>Episode</th>
+        <th>Hinweis</th>
+      </tr>
+    </thead>
+    <tbody id="pipeline-body">
+      {% for j in pipeline.jobs %}
+      <tr>
+        <td><span class="badge {{ j.status }}">{{ j.status }}</span></td>
+        <td><a href="/feeds/{{ j.podcast_slug }}">{{ j.podcast_title }}</a></td>
+        <td>{{ j.title }}{% if j.force %} <span class="muted">(force)</span>{% endif %}</td>
+        <td class="muted">{{ j.message or "—" }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  <p id="pipeline-empty" class="muted" {% if pipeline.jobs %}hidden{% endif %}>Keine Jobs in der Pipeline.</p>
+</section>
+
+<section class="card">
   <h1>Podcast-Feeds</h1>
   <p class="muted">Quell-Feeds verwalten, snippen und als Kapitel-Feeds ausliefern.</p>
   {% if podcasts %}
@@ -32,4 +67,53 @@
   <p class="muted">Noch keine Feeds. Lege den ersten an.</p>
   {% endif %}
 </section>
+
+<script>
+(() => {
+  const body = document.getElementById("pipeline-body");
+  const table = document.getElementById("pipeline-table");
+  const empty = document.getElementById("pipeline-empty");
+  const summary = document.getElementById("pipeline-summary");
+  if (!body) return;
+
+  function escapeHtml(value) {
+    return String(value ?? "")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;");
+  }
+
+  async function refreshPipeline() {
+    try {
+      const res = await fetch("/pipeline.json", { credentials: "same-origin" });
+      if (!res.ok) return;
+      const data = await res.json();
+      summary.textContent = `${data.running} aktiv · ${data.pending} wartend` +
+        (data.worker ? " · Worker läuft" : "");
+      body.innerHTML = "";
+      const jobs = data.jobs || [];
+      if (!jobs.length) {
+        table.hidden = true;
+        empty.hidden = false;
+        return;
+      }
+      empty.hidden = true;
+      table.hidden = false;
+      for (const j of jobs) {
+        const tr = document.createElement("tr");
+        tr.innerHTML = `
+          <td><span class="badge ${escapeHtml(j.status)}">${escapeHtml(j.status)}</span></td>
+          <td><a href="/feeds/${escapeHtml(j.podcast_slug)}">${escapeHtml(j.podcast_title)}</a></td>
+          <td>${escapeHtml(j.title)}${j.force ? ' <span class="muted">(force)</span>' : ""}</td>
+          <td class="muted">${escapeHtml(j.message || "—")}</td>
+        `;
+        body.appendChild(tr);
+      }
+    } catch (_) { /* ignore */ }
+  }
+
+  setInterval(refreshPipeline, 4000);
+})();
+</script>
 {% endblock %}

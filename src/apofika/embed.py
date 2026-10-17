@@ -36,7 +36,7 @@ def embed_chapters(
     end_ms = _ms(duration_sec)
     sorted_chapters = sorted(chapters, key=lambda c: c.start)
     if not sorted_chapters:
-        sorted_chapters = [Chapter(start=0.0, title="Intro")]
+        sorted_chapters = [Chapter(start=0.0, title="1")]
 
     try:
         tags = ID3(dest_mp3)

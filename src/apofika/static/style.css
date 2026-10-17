@@ -224,7 +224,9 @@ button.danger { background: var(--danger); }
 }
 .badge.split { color: var(--ok); border-color: #9ec9ae; background: #eaf6ee; }
 .badge.error { color: var(--danger); border-color: #e0b4b4; background: #f8eaea; }
-.badge.processing { color: var(--warn); border-color: #e2c48a; background: #fff6e4; }
+.badge.processing, .badge.running { color: var(--warn); border-color: #e2c48a; background: #fff6e4; }
+.badge.pending { color: var(--muted); border-color: #cfc7b8; background: #f7f3ea; }
+.badge.done { color: var(--ok); border-color: #9ec9ae; background: #eaf6ee; }
 .badge.new, .badge.unknown { color: var(--muted); background: #f4f1ea; }
 .loading-row {
   display: flex;

@@ -96,14 +96,31 @@ def process_all_cmd(
     force: bool = typer.Option(False, "--force"),
     public_base: Optional[str] = typer.Option(None, "--public-base"),
 ) -> None:
-    """Process latest episode for every active podcast in the DB."""
+    """Scan all feeds into the global queue and process jobs sequentially."""
     from apofika.db import init_db
     from apofika.worker import process_all
 
     init_db()
     results = process_all(force=force, base_url=public_base)
     if not results:
-        typer.echo("No active podcasts. Run `apofika migrate` or create feeds in the UI.")
+        typer.echo("Queue empty — no new co-published episodes.")
+        return
+    for result in results:
+        typer.echo(f"[{result.slug}] {result.message}")
+
+
+@app.command("queue-run")
+def queue_run_cmd(
+    public_base: Optional[str] = typer.Option(None, "--public-base"),
+) -> None:
+    """Drain the global conversion queue (one episode at a time)."""
+    from apofika.db import init_db
+    from apofika.worker import drain_queue
+
+    init_db()
+    results = drain_queue(base_url=public_base)
+    if not results:
+        typer.echo("Queue empty.")
         return
     for result in results:
         typer.echo(f"[{result.slug}] {result.message}")
@@ -115,7 +132,7 @@ def process_slug_cmd(
     force: bool = typer.Option(False, "--force"),
     public_base: Optional[str] = typer.Option(None, "--public-base"),
 ) -> None:
-    """Process one podcast (used by the web UI as a separate low-priority process)."""
+    """Enqueue co-publish batch for one podcast and drain the global queue."""
     from apofika.db import get_podcast_by_slug, init_db, set_process_run
     from apofika.worker import process_podcast
 

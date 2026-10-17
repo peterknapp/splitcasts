@@ -51,6 +51,7 @@
         <th>Titel</th>
         <th>Veröffentlicht</th>
         <th>Status</th>
+        <th></th>
       </tr>
     </thead>
     <tbody id="episodes-body"></tbody>
@@ -167,7 +168,7 @@
   function renderEpisodes(episodes) {
     episodesBody.innerHTML = "";
     if (!episodes.length) {
-      episodesBody.innerHTML = '<tr><td colspan="3" class="muted">Keine Einträge geladen.</td></tr>';
+      episodesBody.innerHTML = '<tr><td colspan="4" class="muted">Keine Einträge geladen.</td></tr>';
     } else {
       for (const item of episodes) {
         const err = item.error
@@ -178,6 +179,12 @@
           <td>${escapeHtml(item.title)}</td>
           <td class="muted nowrap">${escapeHtml(item.published_fmt)}</td>
           <td><span class="badge ${escapeHtml(item.status)}">${escapeHtml(item.status_label)}</span>${err}</td>
+          <td>
+            <button type="button" class="secondary episode-convert-btn"
+              data-guid="${escapeHtml(item.guid)}"
+              data-title="${escapeHtml(item.title)}"
+            >Konvertieren</button>
+          </td>
         `;
         episodesBody.appendChild(tr);
       }
@@ -311,6 +318,37 @@
   }
 
   processDismiss.addEventListener("click", () => { dismissProcessStatus(); });
+
+  episodesBody.addEventListener("click", async (event) => {
+    const btn = event.target.closest(".episode-convert-btn");
+    if (!btn) return;
+    btn.disabled = true;
+    const fd = new FormData();
+    fd.set("guid", btn.getAttribute("data-guid") || "");
+    fd.set("title", btn.getAttribute("data-title") || "");
+    try {
+      const res = await fetch(`/feeds/${slug}/episodes/convert?format=json`, {
+        method: "POST",
+        body: fd,
+        credentials: "same-origin",
+        headers: { Accept: "application/json" },
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || ("HTTP " + res.status));
+      processStatus.hidden = false;
+      processSpinner.hidden = true;
+      processDismiss.hidden = false;
+      processStatus.classList.remove("is-running", "is-error");
+      processStatus.classList.add("is-done");
+      processText.textContent = data.message || "In Pipeline eingereiht.";
+    } catch (err) {
+      processStatus.hidden = false;
+      processStatus.classList.add("is-error");
+      processText.textContent = "Einreihen fehlgeschlagen: " + (err.message || err);
+    } finally {
+      btn.disabled = false;
+    }
+  });
 
   processBtn.addEventListener("click", async () => {
     processBtn.disabled = true;

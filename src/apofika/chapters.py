@@ -71,37 +71,27 @@ def build_chapters(
     **_kwargs,
 ) -> tuple[list[Chapter], list[str]]:
     """
-    Cut marks only — no show-note title mapping.
-
-      Intro @ 0
-      1, 2, 3, … @ each jingle hit (in order)
-
-    ``topics`` is ignored for titles (still accepted for call-site compatibility).
+    Cut marks only — numbered 1..n at each jingle hit. No Intro chapter.
+    ``topics`` is ignored for titles (call-site compatibility).
     """
     warnings: list[str] = []
-    chapters: list[Chapter] = [Chapter(start=0.0, title="Intro")]
-
     times = sorted({float(t) for t in jingle_times if float(t) >= 0.0})
-    # Ignore hits that collide with Intro (same second)
-    times = [t for t in times if t >= 0.5]
 
     if not times:
-        warnings.append("No jingles detected — only Intro chapter")
+        warnings.append("No jingles detected — no chapter marks")
         if topics:
             warnings.append(
                 f"{len(topics)} show-note topic(s) ignored (numbered cuts only)"
             )
-        return chapters, warnings
+        return [], warnings
 
-    for i, t in enumerate(times, start=1):
-        chapters.append(Chapter(start=t, title=str(i)))
+    chapters = [Chapter(start=t, title=str(i)) for i, t in enumerate(times, start=1)]
 
     if topics:
         warnings.append(
             f"{len(topics)} show-note topic(s) ignored (numbered cuts only)"
         )
 
-    # Deduplicate identical consecutive starts
     deduped: list[Chapter] = []
     for ch in chapters:
         if deduped and abs(deduped[-1].start - ch.start) < 0.5:

@@ -60,6 +60,22 @@ class ProcessRun:
     finished_at: str | None
 
 
+@dataclass
+class QueueJob:
+    id: int
+    podcast_id: int
+    guid: str
+    title: str
+    force: bool
+    status: str  # pending | running | done | error
+    message: str | None
+    created_at: str
+    started_at: str | None
+    finished_at: str | None
+    podcast_slug: str | None = None
+    podcast_title: str | None = None
+
+
 def _connect(path: Path | None = None) -> sqlite3.Connection:
     ensure_dirs()
     db = path or db_path()
@@ -127,6 +143,20 @@ def init_db(path: Path | None = None) -> None:
               started_at TEXT,
               finished_at TEXT
             );
+            CREATE TABLE IF NOT EXISTS queue_jobs (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              podcast_id INTEGER NOT NULL REFERENCES podcasts(id) ON DELETE CASCADE,
+              guid TEXT NOT NULL,
+              title TEXT NOT NULL,
+              force INTEGER NOT NULL DEFAULT 0,
+              status TEXT NOT NULL,
+              message TEXT,
+              created_at TEXT NOT NULL,
+              started_at TEXT,
+              finished_at TEXT
+            );
+            CREATE INDEX IF NOT EXISTS idx_queue_status_id
+              ON queue_jobs(status, id);
             """
         )
         cols = {
@@ -135,6 +165,14 @@ def init_db(path: Path | None = None) -> None:
         }
         if "image_url" not in cols:
             conn.execute("ALTER TABLE podcasts ADD COLUMN image_url TEXT")
+        # One active (pending/running) job per podcast+guid
+        conn.execute(
+            """
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_queue_active_guid
+              ON queue_jobs(podcast_id, guid)
+              WHERE status IN ('pending', 'running')
+            """
+        )
 
 
 def _now() -> str:
@@ -461,6 +499,155 @@ def set_process_run(
                 (podcast_id, status, message, started_at, finished_at),
             )
     return get_process_run(podcast_id)
+
+
+def enqueue_job(
+    podcast_id: int,
+    guid: str,
+    title: str,
+    *,
+    force: bool = False,
+) -> QueueJob | None:
+    """Insert a pending job if none is already pending/running for this guid."""
+    with get_conn() as conn:
+        existing = conn.execute(
+            """
+            SELECT id FROM queue_jobs
+            WHERE podcast_id = ? AND guid = ? AND status IN ('pending', 'running')
+            """,
+            (podcast_id, guid),
+        ).fetchone()
+        if existing:
+            return get_queue_job(int(existing["id"]))
+        cur = conn.execute(
+            """
+            INSERT INTO queue_jobs
+              (podcast_id, guid, title, force, status, message, created_at)
+            VALUES (?, ?, ?, ?, 'pending', NULL, ?)
+            """,
+            (podcast_id, guid, title, 1 if force else 0, _now()),
+        )
+        job_id = int(cur.lastrowid)
+    return get_queue_job(job_id)
+
+
+def get_queue_job(job_id: int) -> QueueJob | None:
+    with get_conn() as conn:
+        row = conn.execute(
+            """
+            SELECT q.*, p.slug AS podcast_slug, p.title AS podcast_title
+            FROM queue_jobs q
+            JOIN podcasts p ON p.id = q.podcast_id
+            WHERE q.id = ?
+            """,
+            (job_id,),
+        ).fetchone()
+    return _queue_job(row) if row else None
+
+
+def claim_next_queue_job() -> QueueJob | None:
+    """Atomically mark the next pending job as running and return it."""
+    with get_conn() as conn:
+        row = conn.execute(
+            """
+            SELECT q.*, p.slug AS podcast_slug, p.title AS podcast_title
+            FROM queue_jobs q
+            JOIN podcasts p ON p.id = q.podcast_id
+            WHERE q.status = 'pending'
+            ORDER BY q.id ASC
+            LIMIT 1
+            """
+        ).fetchone()
+        if not row:
+            return None
+        now = _now()
+        conn.execute(
+            """
+            UPDATE queue_jobs
+            SET status = 'running', started_at = ?, message = ?
+            WHERE id = ? AND status = 'pending'
+            """,
+            (now, "In Verarbeitung…", row["id"]),
+        )
+        claimed = conn.execute(
+            """
+            SELECT q.*, p.slug AS podcast_slug, p.title AS podcast_title
+            FROM queue_jobs q
+            JOIN podcasts p ON p.id = q.podcast_id
+            WHERE q.id = ? AND q.status = 'running'
+            """,
+            (row["id"],),
+        ).fetchone()
+    return _queue_job(claimed) if claimed else None
+
+
+def finish_queue_job(
+    job_id: int,
+    *,
+    status: str,
+    message: str | None = None,
+) -> None:
+    with get_conn() as conn:
+        conn.execute(
+            """
+            UPDATE queue_jobs
+            SET status = ?, message = ?, finished_at = ?
+            WHERE id = ?
+            """,
+            (status, message, _now(), job_id),
+        )
+
+
+def list_queue_jobs(
+    *,
+    active_only: bool = False,
+    limit: int = 50,
+) -> list[QueueJob]:
+    sql = """
+      SELECT q.*, p.slug AS podcast_slug, p.title AS podcast_title
+      FROM queue_jobs q
+      JOIN podcasts p ON p.id = q.podcast_id
+    """
+    if active_only:
+        sql += " WHERE q.status IN ('pending', 'running')"
+    sql += " ORDER BY CASE q.status WHEN 'running' THEN 0 WHEN 'pending' THEN 1 ELSE 2 END, q.id DESC"
+    sql += f" LIMIT {int(limit)}"
+    with get_conn() as conn:
+        rows = conn.execute(sql).fetchall()
+    return [_queue_job(r) for r in rows]
+
+
+def queue_counts() -> dict[str, int]:
+    with get_conn() as conn:
+        rows = conn.execute(
+            """
+            SELECT status, COUNT(*) AS n FROM queue_jobs
+            WHERE status IN ('pending', 'running')
+            GROUP BY status
+            """
+        ).fetchall()
+    out = {"pending": 0, "running": 0}
+    for row in rows:
+        out[str(row["status"])] = int(row["n"])
+    return out
+
+
+def _queue_job(row: sqlite3.Row) -> QueueJob:
+    keys = set(row.keys())
+    return QueueJob(
+        id=row["id"],
+        podcast_id=row["podcast_id"],
+        guid=row["guid"],
+        title=row["title"],
+        force=bool(row["force"]),
+        status=row["status"],
+        message=row["message"],
+        created_at=row["created_at"],
+        started_at=row["started_at"],
+        finished_at=row["finished_at"],
+        podcast_slug=row["podcast_slug"] if "podcast_slug" in keys else None,
+        podcast_title=row["podcast_title"] if "podcast_title" in keys else None,
+    )
 
 
 def _episode(row: sqlite3.Row) -> Episode:

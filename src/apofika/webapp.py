@@ -136,6 +136,8 @@ def create_app() -> FastAPI:
     def index(request: Request):
         if (redir := require_auth(request)):
             return redir
+        from apofika.queue import pipeline_snapshot
+
         base = config.public_base()
         podcasts = list_podcasts()
         # Backfill missing cover art once when listing
@@ -145,11 +147,47 @@ def create_app() -> FastAPI:
                 if image:
                     update_podcast_image(podcast.id, image)
                     podcast.image_url = image
+        pipe = pipeline_snapshot(limit=30)
         return render(
             request,
             "index.html",
             podcasts=podcasts,
             public_base=base,
+            pipeline=pipe,
+        )
+
+    @app.get("/pipeline.json")
+    def pipeline_json(request: Request):
+        if not request.session.get("auth"):
+            return JSONResponse({"error": "unauthorized"}, status_code=401)
+        from apofika.formatting import format_published
+        from apofika.jobs import is_queue_worker_running
+        from apofika.queue import pipeline_snapshot
+
+        snap = pipeline_snapshot(limit=40)
+        return JSONResponse(
+            {
+                "pending": snap["pending"],
+                "running": snap["running"],
+                "worker": is_queue_worker_running(),
+                "jobs": [
+                    {
+                        "id": j.id,
+                        "podcast_slug": j.podcast_slug,
+                        "podcast_title": j.podcast_title,
+                        "guid": j.guid,
+                        "title": j.title,
+                        "force": j.force,
+                        "status": j.status,
+                        "message": j.message,
+                        "created_at": j.created_at,
+                        "created_fmt": format_published(j.created_at),
+                        "started_at": j.started_at,
+                        "finished_at": j.finished_at,
+                    }
+                    for j in snap["jobs"]
+                ],
+            }
         )
 
     @app.get("/feeds/new", response_class=HTMLResponse)
@@ -364,7 +402,41 @@ def create_app() -> FastAPI:
         }
         if _wants_json(request):
             return JSONResponse(payload)
-        flash(request, message, error=not started and "läuft bereits" not in message.lower())
+        flash(request, message, error=False)
+        return RedirectResponse(f"/feeds/{slug}", status_code=303)
+
+    @app.post("/feeds/{slug}/episodes/convert")
+    async def episode_convert(
+        request: Request,
+        slug: str,
+        guid: str = Form(...),
+        title: str = Form(""),
+    ):
+        if (redir := require_auth(request)):
+            return redir
+        podcast = get_podcast_by_slug(slug)
+        if not podcast:
+            if _wants_json(request):
+                return JSONResponse({"ok": False, "error": "not_found"}, status_code=404)
+            flash(request, "Feed nicht gefunden.", error=True)
+            return RedirectResponse("/", status_code=303)
+
+        from apofika.db import enqueue_job
+        from apofika.jobs import ensure_queue_worker
+        from apofika.queue import enqueue_podcast_scan
+
+        # Prefer RSS title when available
+        try:
+            guids = enqueue_podcast_scan(podcast, force_guid=guid)
+        except Exception:
+            guids = []
+            enqueue_job(podcast.id, guid, title or guid, force=True)
+            guids = [guid]
+        ensure_queue_worker()
+        message = f"Episode in Pipeline eingereiht ({guid[:12]}…)." if guids else "Bereits in der Pipeline."
+        if _wants_json(request):
+            return JSONResponse({"ok": True, "queued": guids, "message": message})
+        flash(request, message)
         return RedirectResponse(f"/feeds/{slug}", status_code=303)
 
     @app.post("/feeds/{slug}/process-status/dismiss")

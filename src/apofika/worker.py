@@ -12,11 +12,15 @@ from apofika.chapters import Chapter, build_chapters, parse_topics, save_chapter
 from apofika.config import public_base
 from apofika.db import (
     Podcast,
+    claim_next_queue_job,
+    finish_queue_job,
     get_episode_by_guid,
+    get_podcast,
     list_podcasts,
     list_snippets,
     list_split_episodes,
     mark_episode_purged,
+    set_process_run,
     upsert_episode,
 )
 from apofika.detect import detect_jingles_multi
@@ -25,7 +29,7 @@ from apofika.fetch import (
     EpisodeMeta,
     channel_meta,
     download_episode,
-    parse_latest,
+    parse_recent,
     safe_filename,
 )
 from apofika.paths import (
@@ -127,7 +131,7 @@ def rebuild_podcast_feed(podcast: Podcast, base_url: str | None = None) -> Path:
                 author="Splitcasts",
                 episode_number=None,
             )
-            episodes_out.append((meta, stub, [Chapter(start=0.0, title="Intro")]))
+            episodes_out.append((meta, stub, [Chapter(start=0.0, title="1")]))
 
     cover = refresh_badged_cover(podcast.slug, source_image)
     if cover and cover.exists():
@@ -188,36 +192,27 @@ def prune_podcast(podcast: Podcast, keep: int = MAX_KEEP_EPISODES) -> int:
     return removed
 
 
-def process_podcast(
+def process_episode_meta(
     podcast: Podcast,
+    meta: EpisodeMeta,
     *,
     force: bool = False,
     threshold: float = 0.55,
     min_distance_sec: float = 60.0,
     base_url: str | None = None,
+    channel: dict | None = None,
 ) -> ProcessResult:
+    """Convert one concrete episode (used by the global queue)."""
     ensure_feed_dirs(podcast.slug)
     snippets = _snippet_paths(podcast)
     if not snippets:
         return ProcessResult(
             skipped=True,
-            guid="",
-            title="",
+            guid=meta.guid,
+            title=meta.title,
             slug=podcast.slug,
             message=f"No snippets for {podcast.slug}; upload jingle references first.",
             error="no_snippets",
-        )
-
-    try:
-        meta, parsed = parse_latest(podcast.source_rss_url)
-    except Exception as exc:
-        return ProcessResult(
-            skipped=True,
-            guid="",
-            title="",
-            slug=podcast.slug,
-            message=f"Failed to fetch source feed: {exc}",
-            error=str(exc),
         )
 
     existing = get_episode_by_guid(podcast.id, meta.guid)
@@ -279,7 +274,7 @@ def process_podcast(
                 "image_url": meta.image_url,
                 "author": meta.author,
                 "episode_number": meta.episode_number,
-                "channel": channel_meta(parsed),
+                "channel": channel or {},
             },
         )
 
@@ -328,11 +323,135 @@ def process_podcast(
         )
 
 
-def process_all(*, force: bool = False, base_url: str | None = None) -> list[ProcessResult]:
+def _resolve_meta(podcast: Podcast, guid: str) -> tuple[EpisodeMeta | None, dict]:
+    items, parsed = parse_recent(podcast.source_rss_url, limit=20)
+    ch = channel_meta(parsed)
+    for meta in items:
+        if meta.guid == guid:
+            return meta, ch
+    return None, ch
+
+
+def drain_queue(*, base_url: str | None = None, max_jobs: int | None = None) -> list[ProcessResult]:
+    """Process pending queue jobs strictly one after another."""
     results: list[ProcessResult] = []
-    for podcast in list_podcasts(active_only=True):
-        results.append(process_podcast(podcast, force=force, base_url=base_url))
+    done = 0
+    while max_jobs is None or done < max_jobs:
+        job = claim_next_queue_job()
+        if not job:
+            break
+        podcast = get_podcast(job.podcast_id)
+        if not podcast:
+            finish_queue_job(job.id, status="error", message="Podcast fehlt")
+            continue
+        set_process_run(
+            podcast.id,
+            status="running",
+            message=f"Queue: {job.title}",
+            started=True,
+        )
+        meta, channel = _resolve_meta(podcast, job.guid)
+        if meta is None:
+            msg = f"Episode nicht mehr im Quell-Feed: {job.guid}"
+            finish_queue_job(job.id, status="error", message=msg)
+            set_process_run(podcast.id, status="error", message=msg, finished=True)
+            results.append(
+                ProcessResult(
+                    skipped=True,
+                    guid=job.guid,
+                    title=job.title,
+                    slug=podcast.slug,
+                    message=msg,
+                    error="missing_in_source",
+                )
+            )
+            done += 1
+            continue
+        result = process_episode_meta(
+            podcast,
+            meta,
+            force=job.force,
+            base_url=base_url,
+            channel=channel,
+        )
+        finish_queue_job(
+            job.id,
+            status="error" if (result.error and not result.skipped) else "done",
+            message=result.message,
+        )
+        set_process_run(
+            podcast.id,
+            status="error" if (result.error and not result.skipped) else "done",
+            message=result.message,
+            finished=True,
+        )
+        results.append(result)
+        done += 1
     return results
+
+
+def process_podcast(
+    podcast: Podcast,
+    *,
+    force: bool = False,
+    threshold: float = 0.55,
+    min_distance_sec: float = 60.0,
+    base_url: str | None = None,
+) -> ProcessResult:
+    """Scan co-published batch into the global queue and drain it."""
+    from apofika.queue import enqueue_podcast_scan
+
+    try:
+        guids = enqueue_podcast_scan(podcast, force_all_in_batch=force)
+    except Exception as exc:
+        return ProcessResult(
+            skipped=True,
+            guid="",
+            title="",
+            slug=podcast.slug,
+            message=f"Failed to fetch source feed: {exc}",
+            error=str(exc),
+        )
+
+    results = drain_queue(base_url=base_url)
+    mine = [r for r in results if r.slug == podcast.slug]
+    if mine:
+        # Prefer a non-skip message if any
+        for r in mine:
+            if not r.skipped:
+                return r
+        return mine[-1]
+    if guids:
+        return ProcessResult(
+            skipped=True,
+            guid=guids[0],
+            title="",
+            slug=podcast.slug,
+            message=f"Queued {len(guids)} episode(s), already handled or waiting.",
+        )
+    rebuild_podcast_feed(podcast, base_url=base_url)
+    return ProcessResult(
+        skipped=True,
+        guid="",
+        title="",
+        slug=podcast.slug,
+        message=f"Nothing new to queue for {podcast.slug}",
+    )
+
+
+def process_all(*, force: bool = False, base_url: str | None = None) -> list[ProcessResult]:
+    """Scan all active feeds into the global queue, then drain sequentially."""
+    from apofika.queue import enqueue_all_active_scans, enqueue_podcast_scan
+
+    if force:
+        for podcast in list_podcasts(active_only=True):
+            try:
+                enqueue_podcast_scan(podcast, force_all_in_batch=True)
+            except Exception:
+                continue
+    else:
+        enqueue_all_active_scans()
+    return drain_queue(base_url=base_url)
 
 
 def migrate_apofika_legacy() -> Podcast | None:

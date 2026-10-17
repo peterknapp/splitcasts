@@ -22,6 +22,9 @@ DEFAULT_PORT = 8787
 MAX_KEEP_EPISODES = 3
 MAX_SNIPPETS = 3
 UI_RECENT_EPISODES = 5
+# Auto-queue only episodes published within this window of the newest RSS item
+# (catches same-batch releases, not the whole back catalog).
+CO_PUBLISH_WINDOW_SEC = 2 * 60 * 60
 
 
 def ensure_dirs() -> None:
